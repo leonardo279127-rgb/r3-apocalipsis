@@ -28,7 +28,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract R3Apocalipsis is Ownable, Pausable, ReentrancyGuard {
     /// @notice Precio actual de una partida, en wei (1 MON = 1e18 wei, igual que ETH).
-    uint256 public playPrice = 20 ether; // 20 MON
+    uint256 public playPrice = 10 ether; // 10 MON
 
     /// @notice Total histórico de partidas pagadas.
     uint256 public totalGamesPaid;

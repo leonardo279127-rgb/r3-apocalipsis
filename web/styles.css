@@ -1,12 +1,25 @@
 :root {
+  /* ---- Paleta "r3tards.club": cajas negras + letra blanca a mano, sobre
+     fondo lavanda/morado. Los acentos de color (turquesa/naranja/dorado)
+     se mantienen para indicar rareza — eso no es solo estético, el jugador
+     los usa para reconocer qué tan raro es un NFT de un vistazo. */
   --bg-void: #0a0614;
   --purple: #6E54FF;
   --purple-light: #DDD7FE;
   --purple-deep: #3a1f68;
   --text: #f1ecff;
-  --text-dim: #b6aad9;
+  --text-dim: #cdc3ec;
   --danger: #ff5e7a;
   --ok: #5eead4;
+
+  /* ---- Cajas y botones estilo "r3tards.club": negro sólido, borde claro
+     delgado, esquinas redondeadas, letra blanca. */
+  --ink: #0b0710;
+  --ink-soft: rgba(11, 7, 16, 0.86);
+  --paper: #f7f3ff;
+  --line: rgba(247, 243, 255, 0.32);
+  --line-strong: rgba(247, 243, 255, 0.55);
+
   color-scheme: dark;
 }
 
@@ -18,8 +31,8 @@ html, body {
   width: 100%;
   height: 100%;
   background: var(--bg-void);
-  color: var(--text);
-  font-family: 'Rubik', system-ui, sans-serif;
+  color: var(--paper);
+  font-family: 'Kalam', 'Comic Sans MS', system-ui, sans-serif;
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
 }
@@ -43,15 +56,15 @@ html, body {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 20% 20%, rgba(110, 84, 255,0.25), transparent 45%),
-    radial-gradient(circle at 80% 70%, rgba(199,125,255,0.2), transparent 50%),
-    linear-gradient(160deg, #0a0614 0%, #150a2b 50%, #241145 100%);
+    radial-gradient(circle at 20% 20%, rgba(110, 84, 255,0.28), transparent 45%),
+    radial-gradient(circle at 80% 70%, rgba(199,125,255,0.22), transparent 50%),
+    linear-gradient(160deg, #0a0614 0%, #1c0f38 50%, #2d1652 100%);
   animation: bgPulse 8s ease-in-out infinite alternate;
   z-index: 0;
 }
 @keyframes bgPulse {
   from { filter: brightness(1); }
-  to { filter: brightness(1.25); }
+  to { filter: brightness(1.22); }
 }
 
 .menu-card {
@@ -59,35 +72,36 @@ html, body {
   z-index: 1;
   max-width: 560px;
   width: 100%;
-  background: rgba(20, 12, 38, 0.72);
-  border: 1px solid rgba(110, 84, 255,0.35);
-  border-radius: 20px;
-  padding: 32px 28px;
+  background: var(--ink-soft);
+  border: 2px solid var(--line);
+  border-radius: 26px;
+  padding: 34px 28px;
   backdrop-filter: blur(10px);
-  box-shadow: 0 0 60px rgba(110, 84, 255,0.15), inset 0 0 40px rgba(110, 84, 255,0.05);
+  box-shadow: 0 0 60px rgba(110, 84, 255,0.2), 0 14px 0 rgba(0,0,0,0.25);
   text-align: center;
 }
 
 .title {
-  font-family: 'Orbitron', sans-serif;
-  font-weight: 800;
-  font-size: clamp(2.1rem, 8vw, 3rem);
-  margin: 0 0 6px;
-  letter-spacing: 2px;
-  text-shadow: 0 0 18px rgba(110, 84, 255,0.8), 0 0 40px rgba(199,125,255,0.4);
+  font-family: 'Kalam', cursive, sans-serif;
+  font-weight: 700;
+  font-size: clamp(2.2rem, 9vw, 3.2rem);
+  margin: 0 0 8px;
+  letter-spacing: 0.5px;
+  line-height: 1.05;
 }
-.title-r3 { color: var(--purple-light); }
+.title-r3 {
+  color: var(--paper);
+  text-shadow: 3px 3px 0 var(--purple);
+}
 .title-apoc {
-  background: linear-gradient(90deg, #ff5e7a, #c77dff, #6E54FF);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: #ffd166;
+  text-shadow: 3px 3px 0 var(--danger);
 }
 
 .subtitle {
   color: var(--text-dim);
   margin: 0 0 20px;
-  font-size: 0.98rem;
+  font-size: 1.08rem;
   line-height: 1.5;
 }
 
@@ -99,67 +113,78 @@ html, body {
   margin-bottom: 18px;
 }
 .stat-pill {
-  background: rgba(110, 84, 255,0.12);
-  border: 1px solid rgba(110, 84, 255,0.3);
-  border-radius: 12px;
-  padding: 8px 14px;
+  background: var(--ink);
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 16px;
   min-width: 110px;
 }
-.stat-label { display: block; font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
-.stat-value { display: block; font-weight: 700; margin-top: 2px; font-size: 0.92rem; }
+.stat-label { display: block; font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+.stat-value { display: block; font-weight: 700; margin-top: 2px; font-size: 1rem; color: var(--paper); }
 
 .progress-wrap { margin: 14px 0; }
-.progress-label { font-size: 0.82rem; color: var(--text-dim); margin-bottom: 6px; }
-.progress-track { height: 8px; background: rgba(255,255,255,0.08); border-radius: 6px; overflow: hidden; }
+.progress-label { font-size: 0.9rem; color: var(--text-dim); margin-bottom: 6px; }
+.progress-track { height: 10px; background: var(--ink); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
 .progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #6E54FF, #c77dff); transition: width 0.2s ease; }
 
 .menu-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 18px 0 10px; }
 
+/* Botones tipo "píldora negra" — como los tabs de arriba en r3tards.club. */
 .btn {
-  font-family: 'Rubik', sans-serif;
+  font-family: 'Kalam', cursive, sans-serif;
   font-weight: 700;
-  font-size: 1rem;
-  padding: 13px 22px;
-  border-radius: 12px;
-  border: none;
+  font-size: 1.08rem;
+  padding: 13px 26px;
+  border-radius: 999px;
+  border: 2px solid var(--line);
   cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease, border-color 0.12s ease;
+  text-decoration: none;
+  display: inline-block;
 }
-.btn:active { transform: scale(0.97); }
+.btn:active { transform: scale(0.97) translateY(1px); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+/* El atributo HTML `hidden` debe ganar SIEMPRE sobre el `display:
+   inline-block` de arriba (que se agregó para que el botón "Volver al
+   juego" de logros.html, que es un <a>, se vea bien) — si no, cualquier
+   botón que arranca oculto con `hidden` (reintentar colección, saltar
+   precarga, etc.) queda visible desde el arranque en vez de aparecer solo
+   cuando JS lo decide. */
+.btn[hidden] { display: none; }
 
 .btn-primary {
-  background: linear-gradient(90deg, #6E54FF, #c77dff);
-  color: #140a26;
-  box-shadow: 0 0 20px rgba(110, 84, 255,0.55);
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--purple);
+  box-shadow: 0 0 22px rgba(110, 84, 255,0.55);
 }
-.btn-primary:not(:disabled):hover { box-shadow: 0 0 30px rgba(199,125,255,0.75); }
+.btn-primary:not(:disabled):hover { box-shadow: 0 0 30px rgba(199,125,255,0.75); border-color: #c77dff; }
 
 .btn-secondary {
-  background: rgba(255,255,255,0.06);
-  color: var(--text);
-  border: 1px solid rgba(255,255,255,0.18);
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--line);
 }
-.btn-secondary:not(:disabled):hover { background: rgba(255,255,255,0.12); }
+.btn-secondary:not(:disabled):hover { border-color: var(--line-strong); }
 
-.wallet-status { font-size: 0.85rem; color: var(--text-dim); margin: 6px 0 0; }
-#btn-retry-collection { margin-top: 10px; padding: 9px 16px; font-size: 0.85rem; }
+.wallet-status { font-size: 0.92rem; color: var(--text-dim); margin: 6px 0 0; }
+#btn-retry-collection { margin-top: 10px; padding: 9px 18px; font-size: 0.92rem; }
 .menu-error {
-  color: var(--danger);
-  background: rgba(255,94,122,0.1);
-  border: 1px solid rgba(255,94,122,0.35);
-  border-radius: 10px;
-  padding: 8px 12px;
-  font-size: 0.85rem;
+  color: var(--paper);
+  background: var(--ink);
+  border: 2px solid var(--danger);
+  border-radius: 16px;
+  padding: 10px 14px;
+  font-size: 0.92rem;
   margin-top: 10px;
 }
 
-.how-to { margin-top: 18px; text-align: left; font-size: 0.85rem; color: var(--text-dim); }
-.how-to summary { cursor: pointer; color: var(--purple-light); font-weight: 600; }
+.how-to { margin-top: 18px; text-align: left; font-size: 0.92rem; color: var(--text-dim); }
+.how-to summary { cursor: pointer; color: var(--paper); font-weight: 700; }
 .how-to ul { margin: 10px 0 0; padding-left: 20px; line-height: 1.6; }
 
-.footer-note { margin-top: 18px; font-size: 0.72rem; color: var(--text-dim); opacity: 0.8; }
-.footer-note a { color: var(--purple-light); }
+.footer-note { margin-top: 18px; font-size: 0.8rem; color: var(--text-dim); opacity: 0.85; }
+.footer-note a { color: #ffd166; }
 
 /* ---------------- JUEGO ---------------- */
 #screen-game.active { display: block; }
@@ -171,14 +196,72 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 10px;
   padding: 14px 18px;
   pointer-events: none;
-  font-family: 'Orbitron', sans-serif;
-  text-shadow: 0 0 8px rgba(0,0,0,0.8);
+  font-family: 'Kalam', cursive, sans-serif;
 }
-.hud-score { font-size: 1.1rem; font-weight: 800; }
-.hud-wave { font-size: 0.78rem; color: var(--purple-light); margin-top: 4px; }
-.hud-progress { font-size: 0.72rem; color: var(--text-dim); margin-top: 2px; }
+.hud-left, .hud-right { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.hud-right { align-items: flex-end; }
+
+/* Cada dato del HUD va en su propia "etiqueta" negra — igual que las cajas
+   LORE/1st RULE/MOTTO de r3tards.club — para que se lea bien encima de
+   cualquier fondo/imagen que esté cayendo detrás. */
+.hud-score,
+.hud-wave,
+.hud-progress,
+.hud-combo {
+  background: var(--ink-soft);
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 14px;
+  line-height: 1.3;
+}
+.hud-score { font-size: 1.15rem; font-weight: 700; color: var(--paper); }
+.hud-wave { font-size: 0.86rem; color: var(--purple-light); }
+.hud-progress { font-size: 0.8rem; color: var(--text-dim); }
+
+/* Indicador de dificultad: sube un escalón cada minuto real de partida
+   (ver SPAWN_PROGRESSION.durationMinutes / difficultyStep en game.js) —
+   se pidió explícitamente que esto se VEA, no solo se sienta en la
+   velocidad, así que es su propia etiqueta con barrita de progreso. */
+.hud-difficulty {
+  background: var(--ink-soft);
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 14px;
+  line-height: 1.3;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+#hud-difficulty-level { color: var(--paper); font-weight: 700; }
+.hud-difficulty-bar {
+  width: 46px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(247, 243, 255, 0.18);
+  overflow: hidden;
+  flex: none;
+}
+.hud-difficulty-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--purple), var(--danger));
+  transition: width 0.5s ease;
+}
+.hud-difficulty-bump {
+  animation: hud-difficulty-bump 0.5s ease;
+}
+@keyframes hud-difficulty-bump {
+  0% { transform: scale(1); border-color: var(--line); }
+  35% { transform: scale(1.12); border-color: var(--purple-light); box-shadow: 0 0 14px rgba(110, 84, 255, 0.75); }
+  100% { transform: scale(1); border-color: var(--line); }
+}
 .hud-lives { display: flex; gap: 5px; justify-content: flex-end; }
 .life-icon {
   width: 22px;
@@ -191,10 +274,10 @@ html, body {
   filter: grayscale(1) brightness(0.6);
 }
 .hud-combo {
-  margin-top: 6px;
-  font-size: 0.85rem;
+  font-size: 0.92rem;
   color: #ffd166;
   text-align: right;
+  border-color: #ffd166;
 }
 
 /* Log en vivo (transparente) de r3tards matados — esquina inferior
@@ -208,17 +291,17 @@ html, body {
   overflow: hidden;
   display: flex;
   flex-direction: column; /* con prepend() en JS, la línea más nueva queda arriba */
-  gap: 4px;
+  gap: 5px;
   pointer-events: none;
   z-index: 4;
+  font-family: 'Kalam', cursive, sans-serif;
 }
 .kill-log-line {
-  background: rgba(10, 6, 20, 0.55);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-left: 3px solid var(--purple);
-  border-radius: 8px;
-  padding: 4px 8px;
-  font-size: 0.7rem;
+  background: var(--ink-soft);
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
   line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
@@ -228,7 +311,7 @@ html, body {
 .kill-log-tier { font-weight: 700; margin-right: 3px; }
 .kill-log-name { color: var(--text-dim); }
 .kill-log-pts { color: #ffd166; font-weight: 700; }
-.kill-log-rare, .kill-log-epic, .kill-log-legendary { border-left-color: #ffd166; }
+.kill-log-rare, .kill-log-epic, .kill-log-legendary { border-color: #ffd166; }
 @keyframes killLogIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
 
 .tag-layer {
@@ -249,11 +332,12 @@ html, body {
 .nft-tag {
   position: absolute;
   transform: translateX(-50%);
-  background: rgba(10, 6, 20, 0.82);
-  border: 1px solid rgba(255,255,255,0.25);
-  border-radius: 10px;
-  padding: 6px 10px;
-  font-size: 0.72rem;
+  background: var(--ink-soft);
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-family: 'Kalam', cursive, sans-serif;
   white-space: nowrap;
   max-width: 46vw;
   overflow: hidden;
@@ -261,7 +345,7 @@ html, body {
   animation: tagIn 0.25s ease, tagOut 0.4s ease 2.1s forwards;
 }
 .nft-tag .tag-name { font-weight: 700; }
-.nft-tag .tag-tier { display: block; font-size: 0.65rem; opacity: 0.85; margin-top: 2px; }
+.nft-tag .tag-tier { display: block; font-size: 0.7rem; opacity: 0.9; margin-top: 2px; }
 
 @keyframes tagIn { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @keyframes tagOut { to { opacity: 0; } }
@@ -271,15 +355,14 @@ html, body {
   top: 30%;
   left: 50%;
   transform: translate(-50%, -50%) scale(0.8);
-  font-family: 'Orbitron', sans-serif;
-  font-weight: 800;
-  font-size: clamp(1.2rem, 5vw, 2rem);
+  font-family: 'Kalam', cursive, sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.3rem, 5vw, 2.1rem);
   text-align: center;
-  padding: 10px 26px;
-  border-radius: 14px;
-  border: 2px solid currentColor;
-  background: rgba(10,6,20,0.7);
-  text-shadow: 0 0 18px currentColor;
+  padding: 12px 28px;
+  border-radius: 20px;
+  border: 3px solid currentColor;
+  background: var(--ink-soft);
   animation: bannerPop 2.2s ease forwards;
 }
 @keyframes bannerPop {
@@ -296,27 +379,27 @@ html, body {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: radial-gradient(circle at 50% 30%, rgba(110, 84, 255,0.15), var(--bg-void) 70%);
+  background: radial-gradient(circle at 50% 30%, rgba(110, 84, 255,0.18), var(--bg-void) 70%);
 }
 .gameover-title {
-  font-family: 'Orbitron', sans-serif;
-  font-size: clamp(1.5rem, 6vw, 2.2rem);
-  color: var(--danger);
-  text-shadow: 0 0 20px rgba(255,94,122,0.6);
+  font-family: 'Kalam', cursive, sans-serif;
+  font-size: clamp(1.7rem, 7vw, 2.4rem);
+  color: var(--paper);
+  text-shadow: 3px 3px 0 var(--danger);
   margin: 0 0 10px;
 }
 .gameover-title.gameover-title-victory {
-  color: #ffd166;
-  text-shadow: 0 0 24px rgba(255,209,102,0.75), 0 0 46px rgba(255,209,102,0.35);
+  color: var(--paper);
+  text-shadow: 3px 3px 0 #ffd166;
 }
 .gameover-victory {
   color: #ffd166;
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 1rem;
   margin: 0 0 12px;
 }
-.gameover-score { font-size: 1.3rem; font-weight: 700; margin: 4px 0; }
-.gameover-sub { color: var(--text-dim); font-size: 0.9rem; margin: 0 0 14px; }
+.gameover-score { font-size: 1.4rem; font-weight: 700; margin: 4px 0; }
+.gameover-sub { color: var(--text-dim); font-size: 0.95rem; margin: 0 0 14px; }
 .kill-breakdown {
   list-style: none;
   padding: 0;
@@ -327,10 +410,11 @@ html, body {
   justify-content: center;
 }
 .kill-breakdown li {
-  background: rgba(255,255,255,0.06);
-  border-radius: 10px;
-  padding: 6px 10px;
-  font-size: 0.78rem;
+  background: var(--ink);
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.85rem;
 }
 
 /* ---------------- TOAST ---------------- */
@@ -339,11 +423,12 @@ html, body {
   bottom: 22px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(15, 8, 30, 0.92);
-  border: 1px solid rgba(110, 84, 255,0.5);
-  border-radius: 12px;
-  padding: 10px 18px;
-  font-size: 0.85rem;
+  background: var(--ink-soft);
+  border: 2px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 10px 20px;
+  font-size: 0.92rem;
+  font-family: 'Kalam', cursive, sans-serif;
   z-index: 50;
   max-width: 90vw;
   text-align: center;
@@ -351,8 +436,8 @@ html, body {
 }
 
 @media (max-width: 480px) {
-  .menu-card { padding: 24px 18px; }
-  .stat-pill { min-width: 90px; padding: 6px 10px; }
+  .menu-card { padding: 26px 18px; }
+  .stat-pill { min-width: 90px; padding: 6px 12px; }
 }
 
 /* ---------------- LOGROS (logros.html) ---------------- */
@@ -377,7 +462,7 @@ html, body {
 .kill-empty {
   text-align: center;
   color: var(--text-dim);
-  font-size: 0.95rem;
+  font-size: 1rem;
   padding: 20px;
 }
 
@@ -389,9 +474,9 @@ html, body {
 }
 
 .kill-card {
-  background: rgba(20, 12, 38, 0.72);
-  border: 1px solid var(--tier-color, rgba(110, 84, 255,0.35));
-  border-radius: 14px;
+  background: var(--ink-soft);
+  border: 2px solid var(--tier-color, var(--line));
+  border-radius: 18px;
   padding: 10px;
   text-align: center;
   box-shadow: 0 0 18px color-mix(in srgb, var(--tier-color, #6E54FF) 25%, transparent);
@@ -400,7 +485,7 @@ html, body {
 .kill-card-img {
   width: 100%;
   aspect-ratio: 1 / 1;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   background: rgba(255,255,255,0.06);
   margin-bottom: 8px;
@@ -412,21 +497,21 @@ html, body {
 .kill-card-noimg { font-size: 1.4rem; color: var(--text-dim); }
 
 .kill-card-name {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .kill-card-tier {
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   color: var(--tier-color, var(--text-dim));
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-top: 2px;
 }
 .kill-card-count {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   color: var(--text-dim);
   margin-top: 2px;
 }

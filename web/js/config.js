@@ -57,14 +57,19 @@ window.R3_CONFIG = {
   CACHE_TTL_MS: 1000 * 60 * 60 * 24, // 24 horas
 
   // ---- Progresión de rareza y dificultad, basada en TIEMPO real de la
-  // partida (no en el puntaje) — para que una partida "perfecta" (sin
-  // perder ninguna vida) alcance el máximo de dificultad/rareza más o
-  // menos a las 3 horas, y se quede ahí después (el juego no tiene fin).
+  // partida (no en el puntaje) — para que una partida vaya notándose más
+  // difícil MINUTO A MINUTO, y llegue a su punto más difícil (y se quede
+  // ahí, el juego no tiene fin) a los `durationMinutes`.
   // Al inicio de la partida, progress01() = 0 (fácil, legendarios muy
   // raros). A los `durationMinutes`, progress01() = 1 (máximo) y ya no
   // sigue subiendo — así nunca se vuelve imposible ni absurdamente veloz.
+  // IMPORTANTE: progress01() (en game.js) avanza en saltos por MINUTO
+  // COMPLETO, no de forma continua — a propósito, para que el salto de
+  // dificultad se note claramente cada minuto (velocidad, qué tan
+  // seguido caen, qué tan probable es un raro) en vez de subir tan
+  // despacio que sea imperceptible.
   SPAWN_PROGRESSION: {
-    durationMinutes: 180, // ~3 horas para llegar al máximo
+    durationMinutes: 10, // 10 escalones de dificultad, uno por minuto, hasta llegar al máximo
     // (La vida/dificultad de cada NFT ya no sube igual para todos — ver
     // "hpGrowth" en cada tier, más abajo en TIERS. Los raros suben mucho
     // más que los comunes.)

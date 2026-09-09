@@ -29,6 +29,10 @@
   const hudScore = el("hud-score");
   const hudWave = el("hud-wave");
   const hudWaveName = el("hud-wave-name");
+  const hudDifficulty = el("hud-difficulty");
+  const hudDifficultyLevel = el("hud-difficulty-level");
+  const hudDifficultyMax = el("hud-difficulty-max");
+  const hudDifficultyFill = el("hud-difficulty-fill");
   const hudLives = el("hud-lives");
   const hudCombo = el("hud-combo");
   const hudProgress = el("hud-progress");
@@ -144,31 +148,39 @@
         const label = phase === "metadata" ? "Resolviendo imágenes y nombres" : phase === "uri" ? "Leyendo la colección on-chain" : "Cargando colección r3tards";
         progressLabel.textContent = `${label}… ${loaded}/${total}`;
       });
-      // Adelanta la descarga de las ~1033 imágenes ANTES de dejar jugar (no
-      // en paralelo con la partida ya empezada) — si se hiciera en segundo
-      // plano mientras el jugador ya está jugando, esas ~1033 descargas
-      // compiten por la misma conexión contra las pocas imágenes que sí
-      // hacen falta ya mismo (las que van cayendo), y el jugador termina
-      // viendo círculos vacíos toda la partida en vez de una mejora. Por
-      // eso se espera aquí, mostrando el progreso real, con un tope de
-      // tiempo por si la conexión es muy lenta (mejor jugar con algunas
-      // imágenes todavía cargando que quedarse pegado para siempre en el
-      // menú). Ver el comentario de prefetchImages() en game.js.
+      // Adelanta la descarga de las ~1033 imágenes en dos etapas, para no
+      // tener que elegir entre "esperar todo" (lento) y "no esperar nada"
+      // (carreras de red, círculos vacíos — ver el historial de esto en el
+      // README, sección 7.5-7.7):
+      //   1) Un empujón CORTO y de tiempo fijo (QUICK_START_MS) apenas la
+      //      colección está lista, antes de habilitar "Jugar" — así ya
+      //      arrancas con una buena parte de las imágenes en caché, sin
+      //      tener que esperar las 1033.
+      //   2) El resto sigue descargándose SOLO, en segundo plano, MIENTRAS
+      //      ya estás jugando — sin bloquear nada. Para que esas descargas
+      //      de fondo no le quiten ancho de banda a las imágenes que sí
+      //      hacen falta YA (las que van cayendo), se marcan con prioridad
+      //      BAJA (`fetchPriority: "low"`) y las que sí son urgentes se
+      //      marcan con prioridad ALTA en `loadImageWithFallback()` — el
+      //      navegador mismo se encarga de darles paso a las urgentes
+      //      primero cuando compiten por la misma conexión.
       if (R3Game && typeof R3Game.prefetchImages === "function") {
         progressLabel.textContent = `Colección lista. Precargando imágenes… 0/${loadedCollection.length}`;
         progressBar.style.width = "0%";
-        const PREFETCH_TIMEOUT_MS = 25000;
-        await Promise.race([
-          R3Game.prefetchImages(loadedCollection, (done, total) => {
-            progressBar.style.width = Math.round((done / total) * 100) + "%";
-            progressLabel.textContent = `Precargando imágenes… ${done}/${total}`;
-          }),
-          new Promise((resolve) => setTimeout(resolve, PREFETCH_TIMEOUT_MS)),
-        ]);
+        const QUICK_START_MS = 3500;
+        const prefetchPromise = R3Game.prefetchImages(loadedCollection, (done, total) => {
+          progressBar.style.width = Math.round((done / total) * 100) + "%";
+          progressLabel.textContent = `Precargando imágenes… ${done}/${total}`;
+        });
+        // No hace falta un botón para "saltar" la espera: como el tope ya
+        // es corto y fijo (unos segundos), simplemente se deja pasar ese
+        // tiempo y se sigue — la descarga real (`prefetchPromise`) NO se
+        // cancela, sigue sola de fondo aunque ya se haya dejado de esperar.
+        await Promise.race([prefetchPromise, new Promise((resolve) => setTimeout(resolve, QUICK_START_MS))]);
       }
-      // Recién ahora, con las imágenes ya precargadas (o el tope de tiempo
-      // alcanzado), se marca la colección como lista de verdad para que
-      // "Jugar" pueda usarla.
+      // Recién ahora (con el empujón inicial ya hecho — el resto sigue en
+      // segundo plano) se marca la colección como lista de verdad para
+      // que "Jugar" pueda usarla.
       collection = loadedCollection;
       progressLabel.textContent = `Colección lista: ${collection.length} r3tards cargados ✅`;
       progressBar.style.width = "100%";
@@ -294,6 +306,20 @@
     onWaveChange: (wave, themeName) => {
       hudWave.textContent = wave;
       hudWaveName.textContent = themeName;
+    },
+    onDifficultyChange: (level, max) => {
+      // Sube un escalón por cada minuto real de partida (ver
+      // SPAWN_PROGRESSION.durationMinutes en config.js) — se pidió que
+      // esto se VEA con claridad, así que además de la barrita, el
+      // número "salta" con una animación cada vez que cambia.
+      hudDifficultyLevel.textContent = level;
+      hudDifficultyMax.textContent = max;
+      hudDifficultyFill.style.width = Math.round((level / Math.max(1, max)) * 100) + "%";
+      hudDifficulty.classList.remove("hud-difficulty-bump");
+      // Forzar reflow para poder re-disparar la animación aunque sea el
+      // mismo nombre de clase que ya estaba puesto.
+      void hudDifficulty.offsetWidth;
+      hudDifficulty.classList.add("hud-difficulty-bump");
     },
     onNftTag: (info) => {
       spawnTag(info);

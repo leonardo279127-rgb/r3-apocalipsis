@@ -8,7 +8,7 @@
 <link rel="icon" href="assets/monad-orb.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rubik:wght@400;500;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -78,6 +78,10 @@
       <div class="hud-left">
         <div class="hud-score">Puntaje: <span id="hud-score">0</span></div>
         <div class="hud-wave">Oleada <span id="hud-wave">1</span> — <span id="hud-wave-name">Grieta Inicial</span></div>
+        <div class="hud-difficulty" id="hud-difficulty" title="Sube un escalón cada minuto de partida">
+          Dificultad <span id="hud-difficulty-level">0</span>/<span id="hud-difficulty-max">10</span>
+          <div class="hud-difficulty-bar"><div class="hud-difficulty-fill" id="hud-difficulty-fill"></div></div>
+        </div>
         <div class="hud-progress">r3tards distintos: <span id="hud-progress">0/0</span></div>
       </div>
       <div class="hud-right">

@@ -41,6 +41,7 @@ const R3Game = (() => {
 
   // ---- Progresión por tiempo real (no por puntaje) --------------------
   let sessionStartTs = 0;
+  let lastDifficultyStep = -1; // último "minuto de dificultad" ya avisado (ver progress01/onDifficultyChange)
   let tierBuckets = {}; // tierKey -> item[] (agrupados una vez al iniciar)
 
   // ---- Avatar del jugador: siempre el r3tard MENOS raro de la colección
@@ -74,6 +75,7 @@ const R3Game = (() => {
   let onScoreChange = () => {};
   let onLivesChange = () => {};
   let onWaveChange = () => {};
+  let onDifficultyChange = () => {}; // (minuto actual, minuto máximo) — sube en cada minuto completo de partida
   let onGameOver = () => {};
   let onNftTag = () => {}; // cuadro de texto flotante (DOM) al caer un NFT
   let onKill = () => {}; // se llama en cada NFT eliminado (para logros)
@@ -92,6 +94,7 @@ const R3Game = (() => {
     onScoreChange = callbacks.onScoreChange || onScoreChange;
     onLivesChange = callbacks.onLivesChange || onLivesChange;
     onWaveChange = callbacks.onWaveChange || onWaveChange;
+    onDifficultyChange = callbacks.onDifficultyChange || onDifficultyChange;
     onGameOver = callbacks.onGameOver || onGameOver;
     onNftTag = callbacks.onNftTag || onNftTag;
     onKill = callbacks.onKill || onKill;
@@ -282,6 +285,11 @@ const R3Game = (() => {
     function tryUrl(url, withCors) {
       const img = new Image();
       if (withCors) img.crossOrigin = "anonymous";
+      // Prioridad ALTA: esta imagen hace falta YA (algo la está usando en
+      // este mismo momento — un r3tard cayendo, el fondo, el avatar). Si
+      // compite por red contra el precargado de fondo (que usa prioridad
+      // BAJA, ver prefetchImages), el navegador debe atenderla primero.
+      img.fetchPriority = "high";
       img.onload = () => onDone(img);
       img.onerror = () => {
         if (withCors) tryUrl(url, false); // misma url, ya sin pedir CORS
@@ -304,18 +312,33 @@ const R3Game = (() => {
    * aparece", aunque el archivo exista y esté bien en el repo. Lo mismo le
    * pasa al fondo (ensureBgImage) si tiene que competir por red contra
    * todas las caídas a la vez.
-   * La solución no es tocar el spawn (tiene que seguir siendo al azar) ni
-   * el fallback CORS de arriba (eso ya está bien) — es adelantar la
-   * descarga de TODA la colección en cuanto está lista la lista de items,
-   * ANTES de dejar jugar (no en paralelo con la partida ya empezada) — así
-   * no compite por conexión/ancho de banda contra las imágenes que sí hacen
-   * falta ya mismo durante el juego. main.js espera esta promesa (con un
-   * tope de tiempo, ver ensureCollectionLoaded) antes de dar por lista la
-   * colección, mostrando el progreso en la misma barra que usa para leer
-   * la colección. Con pocas descargas a la vez (CONCURRENCY) para no
-   * saturar la red ni trabar el hilo principal. `onProgress(done, total)`
-   * se llama en cada imagen que termina (bien o mal) y la promesa se
-   * resuelve cuando terminan todas.
+   *
+   * OJO — esto no tiene nada que ver con dónde "viven" las imágenes. Las
+   * 1033 imágenes YA están en el repositorio (`web/data/images/*.png`,
+   * generadas por `tools/build-collection.mjs`) y se sirven directo desde
+   * GitHub Pages — no hay IPFS ni ningún gateway de por medio en este
+   * punto. Pero "estar en el repositorio" no es lo mismo que "ya estar en
+   * el teléfono/computadora de cada jugador": cada visitante, sin importar
+   * dónde esté, tiene que DESCARGAR esos archivos por internet la primera
+   * vez que los necesita — igual que las imágenes de cualquier página web.
+   * No hay forma de que eso tarde CERO segundos; la única pregunta es cómo
+   * repartimos esa espera. La estrategia (coordinada con `main.js` /
+   * `ensureCollectionLoaded`, y con la prioridad "alta" que se le pone a
+   * las imágenes urgentes en `loadImageWithFallback` más arriba) es en dos
+   * tiempos:
+   *   1) Un empujón corto y de tiempo fijo apenas la colección está lista,
+   *      ANTES de dejar jugar — así se arranca con una buena parte ya en
+   *      caché, sin tener que esperar las 1033.
+   *   2) El resto sigue solo, en segundo plano, MIENTRAS el jugador ya
+   *      está jugando — sin bloquear nada. Para que esto no le quite ancho
+   *      de banda a las imágenes que sí hacen falta YA (las que van
+   *      cayendo), cada imagen de este precalentamiento se pide con
+   *      `fetchPriority: "low"` — el navegador mismo le da paso primero a
+   *      cualquier imagen "alta prioridad" que compita por la misma
+   *      conexión en ese momento.
+   * `onProgress(done, total)` se llama en cada imagen que termina (bien o
+   * mal) y la promesa se resuelve cuando terminan todas — pero quien llama
+   * a esta función puede dejar de esperarla sin cancelarla; sigue sola.
    */
   function prefetchImages(coll, onProgress) {
     return new Promise((resolve) => {
@@ -335,12 +358,17 @@ const R3Game = (() => {
       }
       let idx = 0;
       let done = 0;
-      const CONCURRENCY = 8;
+      const CONCURRENCY = 6;
       function next() {
         if (idx >= urls.length) return;
         const url = urls[idx++];
         const img = new Image();
         img.crossOrigin = "anonymous";
+        // Prioridad BAJA a propósito: esta descarga es "por si acaso"
+        // (adelantada), no urgente — si en ese momento hace falta otra
+        // imagen de verdad (fetchPriority "high" en loadImageWithFallback),
+        // el navegador debe atenderla a ella primero.
+        img.fetchPriority = "low";
         const advance = () => {
           done++;
           if (typeof onProgress === "function") onProgress(done, total);
@@ -391,7 +419,23 @@ const R3Game = (() => {
   function progress01() {
     const elapsedMin = (performance.now() - sessionStartTs) / 60000;
     const dur = Math.max(1, CFG.SPAWN_PROGRESSION.durationMinutes);
-    return Math.max(0, Math.min(1, elapsedMin / dur));
+    // Escalonado por MINUTO COMPLETO (no continuo): pedido explícito —
+    // que se sienta que la dificultad sube cada minuto, no que crezca
+    // tan despacio y suave que en la práctica no se note. Cada minuto
+    // que pasa es un salto real en velocidad/frecuencia/rareza; al
+    // llegar a `durationMinutes` ya está en el máximo y se queda ahí.
+    const steppedMin = Math.floor(elapsedMin);
+    return Math.max(0, Math.min(1, steppedMin / dur));
+  }
+
+  // Minuto de dificultad actual (0 al empezar, hasta durationMinutes en
+  // el máximo) — separado de progress01() solo para poder avisarle a la
+  // UI (onDifficultyChange) exactamente cuándo cambia, sin repetir el
+  // cálculo del "piso" del minuto en dos lugares.
+  function difficultyStep() {
+    const elapsedMin = (performance.now() - sessionStartTs) / 60000;
+    const dur = Math.max(1, CFG.SPAWN_PROGRESSION.durationMinutes);
+    return Math.max(0, Math.min(dur, Math.floor(elapsedMin)));
   }
 
   function spawnInterval() {
@@ -583,7 +627,7 @@ const R3Game = (() => {
       legendaryEscalation = 1 + Math.min(legendariesSpawned - 1, 6) * 0.55;
     }
     const hp = Math.max(1, Math.round(tier.hp * (1 + progress01() * growth) * legendaryEscalation));
-    const baseSpeed = 38 + progress01() * 90; // fácil al inicio, hasta ~3x a las 3h, luego se mantiene
+    const baseSpeed = 38 + progress01() * 90; // fácil al inicio, hasta ~3x a los `durationMinutes` (sube en saltos, uno por minuto), luego se mantiene
     const speed = baseSpeed * (tier.sizeMul > 2 ? 0.62 : 1); // lo grande cae más lento (más justo)
     const pointsValue = Math.round(tier.points * rarityBonusMultiplier(item));
     const movement = pickMovementPattern(tier.key);
@@ -726,6 +770,17 @@ const R3Game = (() => {
       wave = newWave;
       onWaveChange(wave, THEMES[(wave - 1) % THEMES.length].name);
       R3Audio.waveUp();
+    }
+
+    // Dificultad según tiempo real (ver progress01/difficultyStep): esto
+    // es lo que de verdad mueve velocidad/frecuencia/rareza, y es
+    // independiente de la oleada (que solo depende del puntaje). Se
+    // avisa a la UI SOLO cuando cambia el escalón, para que se vea el
+    // salto justo en el momento en que ocurre.
+    const newDifficultyStep = difficultyStep();
+    if (newDifficultyStep !== lastDifficultyStep) {
+      lastDifficultyStep = newDifficultyStep;
+      onDifficultyChange(newDifficultyStep, CFG.SPAWN_PROGRESSION.durationMinutes);
     }
 
     spawnTimer -= dt * 1000;
@@ -1153,7 +1208,7 @@ const R3Game = (() => {
 
   function drawFloatTexts() {
     ctx.textAlign = "center";
-    ctx.font = "bold 20px 'Segoe UI', sans-serif";
+    ctx.font = "700 20px 'Kalam', 'Segoe UI', sans-serif";
     for (const t of floatTexts) {
       ctx.globalAlpha = Math.max(0, t.life);
       ctx.fillStyle = t.color;
@@ -1288,6 +1343,7 @@ const R3Game = (() => {
 
     // Progresión por tiempo real, desde cero en cada partida nueva.
     sessionStartTs = performance.now();
+    lastDifficultyStep = -1;
     tierBuckets = {};
     for (const it of collection) {
       const key = it.rarityTier || "common";
@@ -1322,6 +1378,7 @@ const R3Game = (() => {
     onScoreChange(0, 0, 0);
     onLivesChange(lives);
     onWaveChange(wave, THEMES[0].name);
+    onDifficultyChange(0, CFG.SPAWN_PROGRESSION.durationMinutes);
     onProgress(0, collection.length);
     running = true;
     lastTs = performance.now();

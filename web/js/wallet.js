@@ -11,7 +11,7 @@
  *  - Nunca pedimos approve() de ningún token.
  *  - Nunca pedimos firmar mensajes "a ciegas".
  *  - La única transacción posible es playGame() con el valor
- *    exacto (0.3/20 MON según config), visible en la wallet
+ *    exacto (10 MON, o el que tenga configurado el contrato), visible en la wallet
  *    del usuario ANTES de que la confirme.
  * ============================================================
  */
