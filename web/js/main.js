@@ -122,7 +122,16 @@
     collectionLoading = true;
     progressWrap.hidden = false;
     try {
-      collection = await R3Loader.loadCollection((loaded, total, phase) => {
+      // OJO: se guarda en una variable LOCAL a propósito (no en la
+      // variable `collection` de arriba) hasta que también termine el
+      // precargado de imágenes de más abajo. Si se asignara aquí, una
+      // llamada a ensureCollectionLoaded() disparada por apretar "Jugar"
+      // mientras las imágenes todavía se están precargando vería
+      // `collection` ya truthy y devolvería de inmediato en el
+      // `if (collection) return collection;` de arriba — dejando entrar a
+      // jugar ANTES de que el precargado terminara, exactamente el bug que
+      // este precargado existe para evitar.
+      const loadedCollection = await R3Loader.loadCollection((loaded, total, phase) => {
         // "loaded"/"total" son siempre la cantidad real de tokens (nunca
         // más que el tamaño de la colección). Cuando hay dos fases
         // internas (leer on-chain, luego resolver metadata/imágenes),
@@ -135,16 +144,35 @@
         const label = phase === "metadata" ? "Resolviendo imágenes y nombres" : phase === "uri" ? "Leyendo la colección on-chain" : "Cargando colección r3tards";
         progressLabel.textContent = `${label}… ${loaded}/${total}`;
       });
-      progressLabel.textContent = `Colección lista: ${collection.length} r3tards cargados ✅`;
-      setTimeout(() => (progressWrap.hidden = true), 1400);
-      // Adelanta la descarga de las ~1033 imágenes en segundo plano, sin
-      // bloquear el menú ni "Jugar" — así cuando empiece a caer un r3tard
-      // que nunca se pidió antes, su imagen ya está (o casi) en la caché
-      // del navegador en vez de competir en vivo contra el resto de caídas.
-      // Ver el comentario de prefetchImages() en game.js para el porqué.
+      // Adelanta la descarga de las ~1033 imágenes ANTES de dejar jugar (no
+      // en paralelo con la partida ya empezada) — si se hiciera en segundo
+      // plano mientras el jugador ya está jugando, esas ~1033 descargas
+      // compiten por la misma conexión contra las pocas imágenes que sí
+      // hacen falta ya mismo (las que van cayendo), y el jugador termina
+      // viendo círculos vacíos toda la partida en vez de una mejora. Por
+      // eso se espera aquí, mostrando el progreso real, con un tope de
+      // tiempo por si la conexión es muy lenta (mejor jugar con algunas
+      // imágenes todavía cargando que quedarse pegado para siempre en el
+      // menú). Ver el comentario de prefetchImages() en game.js.
       if (R3Game && typeof R3Game.prefetchImages === "function") {
-        R3Game.prefetchImages(collection);
+        progressLabel.textContent = `Colección lista. Precargando imágenes… 0/${loadedCollection.length}`;
+        progressBar.style.width = "0%";
+        const PREFETCH_TIMEOUT_MS = 25000;
+        await Promise.race([
+          R3Game.prefetchImages(loadedCollection, (done, total) => {
+            progressBar.style.width = Math.round((done / total) * 100) + "%";
+            progressLabel.textContent = `Precargando imágenes… ${done}/${total}`;
+          }),
+          new Promise((resolve) => setTimeout(resolve, PREFETCH_TIMEOUT_MS)),
+        ]);
       }
+      // Recién ahora, con las imágenes ya precargadas (o el tope de tiempo
+      // alcanzado), se marca la colección como lista de verdad para que
+      // "Jugar" pueda usarla.
+      collection = loadedCollection;
+      progressLabel.textContent = `Colección lista: ${collection.length} r3tards cargados ✅`;
+      progressBar.style.width = "100%";
+      setTimeout(() => (progressWrap.hidden = true), 1400);
       return collection;
     } catch (err) {
       console.error(err);

@@ -307,36 +307,53 @@ const R3Game = (() => {
    * La solución no es tocar el spawn (tiene que seguir siendo al azar) ni
    * el fallback CORS de arriba (eso ya está bien) — es adelantar la
    * descarga de TODA la colección en cuanto está lista la lista de items,
-   * mucho antes de que hagan falta, con pocas descargas a la vez para no
-   * saturar la red del navegador ni trabar el hilo principal. Así, cuando
-   * un r3tard cae por primera "vez visual", su imagen casi siempre ya está
-   * en la caché HTTP del navegador y aparece de inmediato.
+   * ANTES de dejar jugar (no en paralelo con la partida ya empezada) — así
+   * no compite por conexión/ancho de banda contra las imágenes que sí hacen
+   * falta ya mismo durante el juego. main.js espera esta promesa (con un
+   * tope de tiempo, ver ensureCollectionLoaded) antes de dar por lista la
+   * colección, mostrando el progreso en la misma barra que usa para leer
+   * la colección. Con pocas descargas a la vez (CONCURRENCY) para no
+   * saturar la red ni trabar el hilo principal. `onProgress(done, total)`
+   * se llama en cada imagen que termina (bien o mal) y la promesa se
+   * resuelve cuando terminan todas.
    */
-  function prefetchImages(coll) {
-    if (!Array.isArray(coll) || coll.length === 0) return;
-    const urls = [];
-    for (const item of coll) {
-      if (!item || !item.image) continue;
-      urls.push(resolvedImageUrl(item.image));
-    }
-    let idx = 0;
-    let done = 0;
-    const CONCURRENCY = 10;
-    function next() {
-      if (idx >= urls.length) return;
-      const url = urls[idx++];
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      const advance = () => {
-        done++;
-        next();
-      };
-      img.onload = advance;
-      img.onerror = advance;
-      img.src = url;
-    }
-    const starters = Math.min(CONCURRENCY, urls.length);
-    for (let k = 0; k < starters; k++) next();
+  function prefetchImages(coll, onProgress) {
+    return new Promise((resolve) => {
+      if (!Array.isArray(coll) || coll.length === 0) {
+        resolve();
+        return;
+      }
+      const urls = [];
+      for (const item of coll) {
+        if (!item || !item.image) continue;
+        urls.push(resolvedImageUrl(item.image));
+      }
+      const total = urls.length;
+      if (total === 0) {
+        resolve();
+        return;
+      }
+      let idx = 0;
+      let done = 0;
+      const CONCURRENCY = 8;
+      function next() {
+        if (idx >= urls.length) return;
+        const url = urls[idx++];
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        const advance = () => {
+          done++;
+          if (typeof onProgress === "function") onProgress(done, total);
+          if (done >= total) resolve();
+          else next();
+        };
+        img.onload = advance;
+        img.onerror = advance;
+        img.src = url;
+      }
+      const starters = Math.min(CONCURRENCY, urls.length);
+      for (let k = 0; k < starters; k++) next();
+    });
   }
 
   function getCutoutFor(item) {
