@@ -137,6 +137,14 @@
       });
       progressLabel.textContent = `Colección lista: ${collection.length} r3tards cargados ✅`;
       setTimeout(() => (progressWrap.hidden = true), 1400);
+      // Adelanta la descarga de las ~1033 imágenes en segundo plano, sin
+      // bloquear el menú ni "Jugar" — así cuando empiece a caer un r3tard
+      // que nunca se pidió antes, su imagen ya está (o casi) en la caché
+      // del navegador en vez de competir en vivo contra el resto de caídas.
+      // Ver el comentario de prefetchImages() en game.js para el porqué.
+      if (R3Game && typeof R3Game.prefetchImages === "function") {
+        R3Game.prefetchImages(collection);
+      }
       return collection;
     } catch (err) {
       console.error(err);

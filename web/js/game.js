@@ -292,6 +292,53 @@ const R3Game = (() => {
     tryNext();
   }
 
+  /**
+   * PRECALENTAMIENTO de imágenes — el porqué:
+   * Cada r3tard que cae se elige AL AZAR entre ~1033 posibles (no en orden,
+   * ver spawnNFT), así que casi cada uno es una URL que el navegador nunca
+   * pidió antes. Con la colección de prueba (6 items) eso no se nota,
+   * porque a la 2ª aparición ya está en caché — pero con 1033 la inmensa
+   * mayoría de caídas son "primera vez", y si la respuesta de red no llega
+   * antes de que el r3tard toque el piso (o lo mates), su imagen nunca
+   * llegó a mostrarse a tiempo: se ve como un círculo vacío que "no
+   * aparece", aunque el archivo exista y esté bien en el repo. Lo mismo le
+   * pasa al fondo (ensureBgImage) si tiene que competir por red contra
+   * todas las caídas a la vez.
+   * La solución no es tocar el spawn (tiene que seguir siendo al azar) ni
+   * el fallback CORS de arriba (eso ya está bien) — es adelantar la
+   * descarga de TODA la colección en cuanto está lista la lista de items,
+   * mucho antes de que hagan falta, con pocas descargas a la vez para no
+   * saturar la red del navegador ni trabar el hilo principal. Así, cuando
+   * un r3tard cae por primera "vez visual", su imagen casi siempre ya está
+   * en la caché HTTP del navegador y aparece de inmediato.
+   */
+  function prefetchImages(coll) {
+    if (!Array.isArray(coll) || coll.length === 0) return;
+    const urls = [];
+    for (const item of coll) {
+      if (!item || !item.image) continue;
+      urls.push(resolvedImageUrl(item.image));
+    }
+    let idx = 0;
+    let done = 0;
+    const CONCURRENCY = 10;
+    function next() {
+      if (idx >= urls.length) return;
+      const url = urls[idx++];
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      const advance = () => {
+        done++;
+        next();
+      };
+      img.onload = advance;
+      img.onerror = advance;
+      img.src = url;
+    }
+    const starters = Math.min(CONCURRENCY, urls.length);
+    for (let k = 0; k < starters; k++) next();
+  }
+
   function getCutoutFor(item) {
     const hit = cutoutCache.get(item.tokenId);
     if (hit && hit !== "loading" && hit !== "error") return hit;
@@ -1290,7 +1337,7 @@ const R3Game = (() => {
     if (rafId) cancelAnimationFrame(rafId);
   }
 
-  return { init, start, stop, fireProjectile };
+  return { init, start, stop, fireProjectile, prefetchImages };
 })();
 
 window.R3Game = R3Game;
