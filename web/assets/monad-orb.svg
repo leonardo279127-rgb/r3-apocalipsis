@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <radialGradient id="orbGrad" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#f3ecff"/>
+      <stop offset="35%" stop-color="#b79bff"/>
+      <stop offset="75%" stop-color="#6E54FF"/>
+      <stop offset="100%" stop-color="#4b2fd6"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <circle cx="32" cy="32" r="29" fill="url(#orbGrad)"/>
+  <circle cx="32" cy="32" r="29" fill="none" stroke="#e6d9ff" stroke-width="1.5" opacity="0.6"/>
+  <!-- marca abstracta original, tres picos (no es el logo oficial de Monad) -->
+  <g filter="url(#glow)" fill="#1c1030" opacity="0.9">
+    <path d="M18 40 L24 20 L32 34 L40 20 L46 40 L40 40 L36 27 L32 36 L28 27 L24 40 Z"/>
+  </g>
+  <circle cx="22" cy="22" r="4" fill="#ffffff" opacity="0.55"/>
+</svg>

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>R3 APOCALIPSIS — el juego on-chain de r3tards en Monad</title>
+<meta name="description" content="R3 Apocalipsis: dispara al logo de Monad contra los NFTs de r3tards que caen del cielo. Conecta tu wallet, paga en MON y sobrevive." />
+<link rel="icon" href="assets/monad-orb.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rubik:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- ======================= MENÚ PRINCIPAL ======================= -->
+  <section id="screen-menu" class="screen active">
+    <div class="menu-bg-fx" aria-hidden="true"></div>
+
+    <div class="menu-card">
+      <h1 class="title">
+        <span class="title-r3">R3</span> <span class="title-apoc">APOCALIPSIS</span>
+      </h1>
+      <p class="subtitle">Los <strong>r3tards</strong> de Monad están cayendo. Dispárales antes de que lleguen al suelo.</p>
+
+      <div class="stat-row">
+        <div class="stat-pill">
+          <span class="stat-label">Colección</span>
+          <span class="stat-value">r3tards</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-label">Red</span>
+          <span class="stat-value">Monad Mainnet</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-label">Costo</span>
+          <span class="stat-value" id="price-display">— MON</span>
+        </div>
+      </div>
+
+      <div id="collection-progress" class="progress-wrap" hidden>
+        <div class="progress-label" id="progress-label">Cargando colección r3tards desde Monad…</div>
+        <div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div>
+      </div>
+
+      <div class="menu-actions">
+        <button id="btn-connect" class="btn btn-secondary">🔌 Conectar wallet</button>
+        <button id="btn-play" class="btn btn-primary">🎮 Jugar (— MON)</button>
+      </div>
+
+      <p id="wallet-status" class="wallet-status">No conectado</p>
+      <p id="menu-error" class="menu-error" hidden></p>
+      <button id="btn-retry-collection" class="btn btn-secondary" hidden>🔄 Reintentar carga de la colección</button>
+
+      <details class="how-to">
+        <summary>¿Cómo se juega?</summary>
+        <ul>
+          <li>Conecta tu wallet (necesitas MON en Monad Mainnet).</li>
+          <li>Paga el costo de la partida: se cobra on-chain, una sola transacción, sin permisos raros.</li>
+          <li>Toca o haz clic para disparar el orbe de Monad hacia los NFTs que caen.</li>
+          <li>Entre más raro es el NFT, más grande, más resistente y más puntos vale. Si llega al suelo, pierdes una vida.</li>
+        </ul>
+      </details>
+
+      <p class="footer-note">
+        Contrato de pago verificable on-chain · Colección real de
+        <a href="https://opensea.io/collection/r3tardsnft" target="_blank" rel="noopener">r3tardsnft en OpenSea</a>
+        · <a href="logros.html">🏆 Ver mis logros</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- ======================= PANTALLA DE JUEGO ======================= -->
+  <section id="screen-game" class="screen">
+    <canvas id="game-canvas"></canvas>
+
+    <div class="hud">
+      <div class="hud-left">
+        <div class="hud-score">Puntaje: <span id="hud-score">0</span></div>
+        <div class="hud-wave">Oleada <span id="hud-wave">1</span> — <span id="hud-wave-name">Grieta Inicial</span></div>
+        <div class="hud-progress">r3tards distintos: <span id="hud-progress">0/0</span></div>
+      </div>
+      <div class="hud-right">
+        <div class="hud-lives" id="hud-lives"></div>
+        <div class="hud-combo" id="hud-combo" hidden></div>
+      </div>
+    </div>
+
+    <div id="tag-layer" class="tag-layer" aria-hidden="true"></div>
+    <div id="banner-layer" class="banner-layer" aria-hidden="true"></div>
+
+    <!-- Log en vivo, transparente, de los r3tards que vas matando -->
+    <div id="kill-log" class="kill-log" aria-hidden="true"></div>
+  </section>
+
+  <!-- ======================= GAME OVER ======================= -->
+  <section id="screen-gameover" class="screen">
+    <div class="menu-card gameover-card">
+      <h2 class="gameover-title" id="go-title">FIN DEL APOCALIPSIS</h2>
+      <p class="gameover-victory" id="go-victory-note" hidden>🏆 ¡Mataste los 1033 r3tards distintos! Colección completa.</p>
+      <p class="gameover-score">Puntaje final: <span id="go-score">0</span></p>
+      <p class="gameover-sub">Mejor combo: <span id="go-combo">0</span>x · Oleada alcanzada: <span id="go-wave">1</span> · r3tards distintos: <span id="go-progress">0/0</span></p>
+      <ul class="kill-breakdown" id="go-breakdown"></ul>
+      <div class="menu-actions">
+        <button id="btn-play-again" class="btn btn-primary">🔁 Jugar de nuevo (— MON)</button>
+        <button id="btn-back-menu" class="btn btn-secondary">Menú</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Toast de estado (transacciones, errores) ============ -->
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- ============ Librerías ============ -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+
+  <!-- ============ Código del juego ============ -->
+  <script src="js/config.js"></script>
+  <script src="js/abis.js"></script>
+  <script src="js/nft-loader.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/wallet.js"></script>
+  <script src="js/achievements.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "r3-apocalipsis-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build-collection.mjs"
+  },
+  "dependencies": {
+    "ethers": "^6.13.4"
+  }
+}

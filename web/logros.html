@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Mis logros — R3 APOCALIPSIS</title>
+<meta name="description" content="Conecta tu wallet y mira qué r3tards has matado en R3 Apocalipsis." />
+<link rel="icon" href="assets/monad-orb.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rubik:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <section class="screen active logros-screen">
+    <div class="menu-bg-fx" aria-hidden="true"></div>
+
+    <div class="menu-card logros-card">
+      <h1 class="title" style="font-size: clamp(1.6rem, 6vw, 2.2rem);">🏆 <span class="title-r3">Mis</span> <span class="title-apoc">Logros</span></h1>
+      <p class="subtitle">
+        Conecta la misma wallet con la que jugaste para ver qué r3tards has matado.
+        Esta lista vive <strong>solo en este navegador</strong> — no es on-chain, así que
+        no la vas a ver si cambias de computadora, de navegador, o borras los datos del sitio.
+      </p>
+
+      <div class="menu-actions">
+        <button id="btn-connect-logros" class="btn btn-primary">🔌 Conectar wallet</button>
+        <a href="index.html" class="btn btn-secondary">🎮 Volver al juego</a>
+      </div>
+
+      <p id="logros-status" class="wallet-status">No conectado</p>
+      <p id="logros-error" class="menu-error" hidden></p>
+    </div>
+
+    <div id="logros-results" class="logros-results" hidden>
+      <div class="logros-summary" id="logros-summary"></div>
+      <div class="kill-grid" id="kill-grid"></div>
+    </div>
+
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/abis.js"></script>
+  <script src="js/wallet.js"></script>
+  <script src="js/achievements.js"></script>
+  <script>
+    (function () {
+      const btnConnect = document.getElementById("btn-connect-logros");
+      const statusEl = document.getElementById("logros-status");
+      const errorEl = document.getElementById("logros-error");
+      const resultsEl = document.getElementById("logros-results");
+      const summaryEl = document.getElementById("logros-summary");
+      const gridEl = document.getElementById("kill-grid");
+
+      const TIER_LABELS = { common: "Común", uncommon: "Poco común", rare: "Raro", epic: "Épico", legendary: "Legendario" };
+
+      function showError(msg) {
+        errorEl.textContent = msg;
+        errorEl.hidden = false;
+      }
+
+      function render(address) {
+        const kills = R3Achievements.getKills(address);
+        resultsEl.hidden = false;
+
+        if (kills.length === 0) {
+          summaryEl.innerHTML = `<p class="kill-empty">Todavía no has matado ningún r3tard con esta wallet en este navegador. ¡Ve a jugar!</p>`;
+          gridEl.innerHTML = "";
+          return;
+        }
+
+        const totalKills = kills.reduce((s, k) => s + k.timesKilled, 0);
+        const byTier = {};
+        kills.forEach((k) => { byTier[k.tierKey] = (byTier[k.tierKey] || 0) + k.timesKilled; });
+        const tierPills = Object.entries(byTier)
+          .map(([tier, count]) => `<span class="stat-pill"><span class="stat-label">${TIER_LABELS[tier] || tier}</span><span class="stat-value">${count}</span></span>`)
+          .join("");
+
+        summaryEl.innerHTML = `
+          <div class="stat-row">
+            <span class="stat-pill"><span class="stat-label">r3tards distintos</span><span class="stat-value">${kills.length}</span></span>
+            <span class="stat-pill"><span class="stat-label">Kills totales</span><span class="stat-value">${totalKills}</span></span>
+            ${tierPills}
+          </div>
+        `;
+
+        gridEl.innerHTML = kills
+          .map((k) => `
+            <div class="kill-card" style="--tier-color: ${tierColor(k.tierKey)}">
+              <div class="kill-card-img">
+                ${k.image ? `<img src="${k.image}" alt="${escapeHtml(k.name)}" loading="lazy" />` : `<div class="kill-card-noimg">?</div>`}
+              </div>
+              <div class="kill-card-name">${escapeHtml(k.name)}</div>
+              <div class="kill-card-tier">${TIER_LABELS[k.tierKey] || k.tierKey}</div>
+              <div class="kill-card-count">×${k.timesKilled}</div>
+            </div>
+          `)
+          .join("");
+      }
+
+      function tierColor(tier) {
+        const colors = { common: "#c9c9d6", uncommon: "#7cc4ff", rare: "#5eead4", epic: "#c77dff", legendary: "#ffd166" };
+        return colors[tier] || colors.common;
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+      }
+
+      btnConnect.addEventListener("click", async () => {
+        errorEl.hidden = true;
+        btnConnect.disabled = true;
+        try {
+          const addr = await R3Wallet.connect();
+          statusEl.textContent = `Conectado: ${R3Wallet.shortAddress(addr)}`;
+          render(addr);
+        } catch (err) {
+          console.error(err);
+          showError((err && err.message) || "No se pudo conectar la wallet.");
+        } finally {
+          btnConnect.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
