@@ -19,6 +19,7 @@ const R3Game = (() => {
   let collection = [];
   let falling = [];
   let projectiles = [];
+  let enemyThrows = []; // objetos que épicos/legendarios le lanzan al avatar (ver spawnNFT/OBJECT_KINDS)
   let particles = [];
   let floatTexts = [];
   let banners = []; // avisos grandes tipo "¡LEGENDARIO detectado!"
@@ -314,7 +315,7 @@ const R3Game = (() => {
    * todas las caídas a la vez.
    *
    * OJO — esto no tiene nada que ver con dónde "viven" las imágenes. Las
-   * 1033 imágenes YA están en el repositorio (`web/data/images/*.png`,
+   * 1033 imágenes YA están en el repositorio (`web/data/images/*.webp`,
    * generadas por `tools/build-collection.mjs`) y se sirven directo desde
    * GitHub Pages — no hay IPFS ni ningún gateway de por medio en este
    * punto. Pero "estar en el repositorio" no es lo mismo que "ya estar en
@@ -358,7 +359,11 @@ const R3Game = (() => {
       }
       let idx = 0;
       let done = 0;
-      const CONCURRENCY = 6;
+      // Ahora que build-collection.mjs sirve cada imagen ya reducida a un
+      // WebP chiquito (unos pocos KB, ver GAME_IMAGE_MAX_SIZE), se puede
+      // pedir más en paralelo sin saturar la conexión — antes esto asumía
+      // archivos mucho más pesados.
+      const CONCURRENCY = 12;
       function next() {
         if (idx >= urls.length) return;
         const url = urls[idx++];
@@ -650,10 +655,18 @@ const R3Game = (() => {
       vx = 0;
     }
 
+    // Los "Certified" son los 1/1 de verdad únicos de la colección (ej.
+    // "Cranium", "Angel", "Banana") — ya vienen forzados a tier legendario
+    // desde nft-loader.js/build-collection.mjs (ver computeRarity), y acá
+    // se les muestra SU nombre propio en vez del nombre genérico del token.
+    const isCertified = Boolean(item.certifiedName);
+    const displayName = item.certifiedName || item.name;
+
     const nft = {
       id: item.tokenId + "_" + Math.random().toString(36).slice(2, 7),
       tokenId: item.tokenId,
-      name: item.name,
+      name: displayName,
+      isCertified,
       image: item.image,
       tierKey: tier.key,
       tier,
@@ -672,6 +685,11 @@ const R3Game = (() => {
       spawnT: performance.now(),
       owner: null,
       flash: 0,
+      // A partir de épico, el NFT ataca de verdad: le va lanzando cosas
+      // al avatar mientras cae (ver update()/throwAtAvatar). El primer
+      // lanzamiento tarda un poco (para no ser injusto apenas aparece);
+      // después repite mientras siga vivo y cayendo.
+      throwTimer: tier.key === "epic" || tier.key === "legendary" ? 700 + Math.random() * 700 : null,
     };
     falling.push(nft);
 
@@ -682,7 +700,8 @@ const R3Game = (() => {
 
     onNftTag({
       tokenId: item.tokenId,
-      name: item.name,
+      name: displayName,
+      isCertified,
       tierLabel: tier.label,
       tierKey: tier.key,
       color: tier.color,
@@ -732,6 +751,38 @@ const R3Game = (() => {
       life: 1.4,
     });
     R3Audio.shoot();
+  }
+
+  /**
+   * Objetos que un épico/legendario puede lanzarle al avatar — pedido
+   * explícito: "sorpréndeme", así que hay variedad real de forma y
+   * color, no un solo proyectil genérico. Cada uno se dibuja con canvas
+   * (nada de imágenes externas) en dibujarEnemyThrow().
+   */
+  const THROW_OBJECT_KINDS = ["banana", "manzana", "basura", "roca", "hueso", "tomate"];
+
+  /**
+   * Un épico/legendario (n) le lanza un objeto al avatar desde donde está
+   * cayendo — mismo patrón que fireProjectile pero al revés (el enemigo
+   * apunta al jugador, no el jugador al enemigo).
+   */
+  function throwAtAvatar(n) {
+    const targetX = avatarX, targetY = cssH() - AVATAR_Y_OFFSET;
+    const dx = targetX - n.x, dy = targetY - n.y;
+    const dist = Math.max(1, Math.hypot(dx, dy));
+    const speed = 210 + Math.random() * 70;
+    enemyThrows.push({
+      x: n.x,
+      y: n.y,
+      vx: (dx / dist) * speed,
+      vy: (dy / dist) * speed,
+      rot: Math.random() * Math.PI * 2,
+      spin: (Math.random() < 0.5 ? -1 : 1) * (3 + Math.random() * 3),
+      kind: THROW_OBJECT_KINDS[(Math.random() * THROW_OBJECT_KINDS.length) | 0],
+      color: n.tier.color,
+      life: 3,
+    });
+    R3Audio.shoot(); // mismo "swoosh" que el disparo del jugador, con menos protagonismo visual
   }
 
   // ---------------------------------------------------------------
@@ -796,6 +847,16 @@ const R3Game = (() => {
       n.wobblePhase += dt * 1.6;
       if (n.flash > 0) n.flash -= dt * 4;
 
+      // Épico/legendario: le va lanzando objetos al avatar mientras cae
+      // (independiente de cómo se mueva — normal, zigzag o cruzando).
+      if (n.throwTimer !== null) {
+        n.throwTimer -= dt * 1000;
+        if (n.throwTimer <= 0) {
+          throwAtAvatar(n);
+          n.throwTimer = 1400 + Math.random() * 1000;
+        }
+      }
+
       if (mv && mv.kind === "side") {
         // Cruza horizontalmente y se DEVUELVE por donde vino a mitad de
         // camino — es un bonus: si se escapa por cualquier lado, no
@@ -858,6 +919,37 @@ const R3Game = (() => {
           projectiles.splice(i, 1);
           hitNFT(n, j);
           break;
+        }
+      }
+    }
+
+    // Objetos que épicos/legendarios le lanzaron al avatar (ver
+    // throwAtAvatar) — si conectan, cuesta una vida; si el jugador se
+    // corre a tiempo (moviendo el avatar), pasan de largo sin castigo.
+    const avatarHitX = avatarX, avatarHitY = cssH() - AVATAR_Y_OFFSET, avatarHitR = 30;
+    for (let i = enemyThrows.length - 1; i >= 0; i--) {
+      const p = enemyThrows[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rot += p.spin * dt;
+      p.life -= dt;
+      if (p.life <= 0 || p.x < -40 || p.x > cssW() + 40 || p.y < -40 || p.y > cssH() + 40) {
+        enemyThrows.splice(i, 1);
+        continue;
+      }
+      if (Math.hypot(p.x - avatarHitX, p.y - avatarHitY) < avatarHitR * 0.85) {
+        enemyThrows.splice(i, 1);
+        lives = Math.max(0, lives - 1);
+        onLivesChange(lives);
+        R3Audio.playerHit();
+        burst(avatarHitX, avatarHitY, p.color, 16, 0.8);
+        floatText(avatarHitX, avatarHitY - 40, "¡TE DIERON!", p.color);
+        shakeTime = 0.3;
+        shakeMag = 10;
+        combo = 0;
+        if (lives <= 0) {
+          endGame();
+          return;
         }
       }
     }
@@ -938,6 +1030,7 @@ const R3Game = (() => {
       onKill({
         tokenId: n.tokenId,
         name: n.name,
+        isCertified: n.isCertified,
         // BUG REAL corregido aquí: si la colección se cargó por el
         // respaldo on-chain (sin el snapshot estático), n.image puede
         // ser una URI ipfs://... sin resolver. Eso se guardaba tal cual
@@ -1048,10 +1141,61 @@ const R3Game = (() => {
   const WAVE_CFG = {
     rare: { rings: 3, amp: 5, freq: 5, speed: 2.2, spacing: 7, width: 2.2, glow: 14, colors: ["#5eead4", "#bafff1", "#5eead4"] },
     epic: { rings: 3, amp: 7.5, freq: 6, speed: 3.0, spacing: 8, width: 2.6, glow: 18, colors: ["#ffb84d", "#c77dff", "#ff5e1a"] },
-    legendary: { rings: 4, amp: 9.5, freq: 7, speed: 3.6, spacing: 9, width: 3, glow: 24, colors: ["#fff3b0", "#ffd166", "#ff5e9c", "#ffd166"] },
   };
+
+  /**
+   * Auras de LEGENDARIO: pedido explícito de que cada legendario se vea
+   * único y distinto entre sí, no todos con el mismo dorado de siempre —
+   * fuego, agua, tierra, rayos, cristal, viento, cósmico, tóxico, cada
+   * uno con su propio color Y su propia "forma" de destello (línea,
+   * rayo quebrado, diamante, roca, gota, burbuja...), no solo un cambio
+   * de color. El tema se elige por un hash simple y estable del tokenId
+   * — así la MISMA pieza (ej. "Cranium") siempre se ve exactamente
+   * igual cada vez que cae, partida tras partida.
+   */
+  const LEGENDARY_AURA_THEMES = [
+    {
+      key: "fuego", glowColor: "#ff7a1a", raySpokes: 8, rayStyle: "line",
+      wave: { rings: 4, amp: 11, freq: 8, speed: 4.2, spacing: 8, width: 2.6, glow: 22, colors: ["#fff3b0", "#ff9a3d", "#ff3d1a", "#ff9a3d"] },
+    },
+    {
+      key: "agua", glowColor: "#3ec6ff", raySpokes: 6, rayStyle: "dot",
+      wave: { rings: 4, amp: 5.5, freq: 5, speed: 1.7, spacing: 10, width: 2.4, glow: 20, colors: ["#bdf1ff", "#3ec6ff", "#1a6fff", "#3ec6ff"] },
+    },
+    {
+      key: "tierra", glowColor: "#b08d4a", raySpokes: 6, rayStyle: "rock",
+      wave: { rings: 3, amp: 4, freq: 4, speed: 1.3, spacing: 11, width: 3.4, glow: 16, colors: ["#c9a15a", "#7a5a2a", "#9ee08a", "#7a5a2a"] },
+    },
+    {
+      key: "rayos", glowColor: "#fff36a", raySpokes: 9, rayStyle: "jagged",
+      wave: { rings: 3, amp: 13, freq: 11, speed: 6.5, spacing: 7, width: 1.8, glow: 26, colors: ["#ffffff", "#fff36a", "#8ecbff", "#fff36a"] },
+    },
+    {
+      key: "cristal", glowColor: "#c77dff", raySpokes: 7, rayStyle: "diamond",
+      wave: { rings: 4, amp: 8, freq: 7.5, speed: 3.2, spacing: 9, width: 2.2, glow: 26, colors: ["#f3d9ff", "#c77dff", "#ff9de3", "#c77dff"] },
+    },
+    {
+      key: "viento", glowColor: "#bdf2c9", raySpokes: 6, rayStyle: "arc",
+      wave: { rings: 3, amp: 6, freq: 9, speed: 5.5, spacing: 9, width: 1.6, glow: 16, colors: ["#ffffff", "#bdf2c9", "#eafff0"] },
+    },
+    {
+      key: "cosmico", glowColor: "#b06bff", raySpokes: 10, rayStyle: "twinkle",
+      wave: { rings: 4, amp: 7, freq: 6, speed: 2.6, spacing: 10, width: 2, glow: 28, colors: ["#e6d6ff", "#b06bff", "#4d2b8f", "#b06bff"] },
+    },
+    {
+      key: "toxico", glowColor: "#9dff5e", raySpokes: 7, rayStyle: "bubble",
+      wave: { rings: 3, amp: 9, freq: 5, speed: 2.4, spacing: 10, width: 2.4, glow: 18, colors: ["#e2ff9d", "#9dff5e", "#2b7a1a", "#9dff5e"] },
+    },
+  ];
+  function auraThemeFor(n) {
+    let h = 0;
+    const s = String(n.tokenId);
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return LEGENDARY_AURA_THEMES[h % LEGENDARY_AURA_THEMES.length];
+  }
+
   function drawFluorescentWave(n) {
-    const cfg = WAVE_CFG[n.tierKey];
+    const cfg = n.tierKey === "legendary" ? auraThemeFor(n).wave : WAVE_CFG[n.tierKey];
     if (!cfg) return;
     const t = performance.now() / 1000;
     const baseR = n.size / 2 + 5;
@@ -1083,6 +1227,105 @@ const R3Game = (() => {
     ctx.restore();
   }
 
+  /**
+   * El anillo de "chispas" de cada tema de legendario (ver
+   * LEGENDARY_AURA_THEMES) — no solo cambia el color, cambia la FORMA:
+   * líneas de fuego, gotas de agua, rocas girando, rayos quebrados,
+   * diamantes de cristal, ráfagas de viento, estrellas cósmicas
+   * titilando, o burbujas tóxicas subiendo. Se llama desde dentro del
+   * `ctx.save()`/`ctx.restore()` del aura en drawFalling.
+   */
+  function drawLegendarySparks(n, theme, extra, pulse) {
+    const spokes = theme.raySpokes;
+    const rot = performance.now() / 500;
+    const r1 = n.size / 2 + extra * 0.55;
+    const r2 = n.size / 2 + extra * 1.2;
+    ctx.strokeStyle = theme.glowColor;
+    ctx.fillStyle = theme.glowColor;
+    ctx.lineWidth = 2.5;
+    ctx.globalAlpha = 0.5 + pulse * 0.3;
+
+    for (let i = 0; i < spokes; i++) {
+      const a = rot + (i / spokes) * Math.PI * 2;
+      const cx1 = Math.cos(a) * r1, cy1 = Math.sin(a) * r1;
+      const cx2 = Math.cos(a) * r2, cy2 = Math.sin(a) * r2;
+
+      if (theme.rayStyle === "jagged") {
+        // Rayo eléctrico: quebrado en zigzag, no una línea recta, y
+        // parpadea (no todas las puntas visibles en todo momento).
+        if (Math.sin(performance.now() / 90 + i * 2.4) < 0.15) continue;
+        const midR = (r1 + r2) / 2;
+        const jitter = (Math.sin(performance.now() / 60 + i * 5) * 0.5) * (r2 - r1) * 0.4;
+        const mx = Math.cos(a + 0.18) * midR + jitter, my = Math.sin(a + 0.18) * midR + jitter;
+        ctx.beginPath();
+        ctx.moveTo(cx1, cy1);
+        ctx.lineTo(mx, my);
+        ctx.lineTo(cx2, cy2);
+        ctx.stroke();
+      } else if (theme.rayStyle === "dot") {
+        // Gotas de agua: puntitos redondos orbitando a radio fijo, sube
+        // y baja de tamaño suavemente (como burbujeo calmo).
+        const rr = 2.2 + 1.4 * Math.sin(performance.now() / 260 + i);
+        ctx.beginPath();
+        ctx.arc(cx2, cy2, rr, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (theme.rayStyle === "rock") {
+        // Rocas: cuadraditos girando sobre su propio eje, orbitando lento.
+        ctx.save();
+        ctx.translate(cx2, cy2);
+        ctx.rotate(performance.now() / 900 + i);
+        ctx.fillRect(-3.2, -3.2, 6.4, 6.4);
+        ctx.restore();
+      } else if (theme.rayStyle === "diamond") {
+        // Cristal: diamantes (rombos) que brillan con un pulso propio.
+        const rr = 4 + 1.6 * Math.sin(performance.now() / 200 + i * 1.7);
+        ctx.save();
+        ctx.translate(cx2, cy2);
+        ctx.rotate(a);
+        ctx.beginPath();
+        ctx.moveTo(0, -rr);
+        ctx.lineTo(rr * 0.7, 0);
+        ctx.lineTo(0, rr);
+        ctx.lineTo(-rr * 0.7, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      } else if (theme.rayStyle === "arc") {
+        // Viento: ráfagas curvas cortas, barriendo rápido alrededor.
+        ctx.beginPath();
+        ctx.arc(0, 0, (r1 + r2) / 2, a, a + 0.5);
+        ctx.stroke();
+      } else if (theme.rayStyle === "twinkle") {
+        // Cósmico: estrellitas que titilan cada una por su cuenta (fase
+        // propia por índice), no todas al mismo tiempo.
+        const tw = Math.max(0, Math.sin(performance.now() / 240 + i * 2.9));
+        ctx.save();
+        ctx.globalAlpha = tw;
+        ctx.beginPath();
+        ctx.arc(cx2, cy2, 1.6 + tw * 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else if (theme.rayStyle === "bubble") {
+        // Tóxico: burbujitas que suben (se alejan) y se desvanecen, para
+        // luego reaparecer desde adentro — nunca una línea fija.
+        const cycle = ((performance.now() / 900 + i / spokes) % 1);
+        const rr = r1 + cycle * (r2 - r1) * 1.6;
+        ctx.save();
+        ctx.globalAlpha = (0.5 + pulse * 0.3) * (1 - cycle);
+        ctx.beginPath();
+        ctx.arc(Math.cos(a) * rr, Math.sin(a) * rr, 2.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      } else {
+        // "line" (fuego, y respaldo genérico): chispa recta clásica.
+        ctx.beginPath();
+        ctx.moveTo(cx1, cy1);
+        ctx.lineTo(cx2, cy2);
+        ctx.stroke();
+      }
+    }
+  }
+
   function drawFalling(n) {
     ctx.save();
     const wob = Math.sin(n.wobblePhase) * n.wobbleAmp * 0.15;
@@ -1101,6 +1344,11 @@ const R3Game = (() => {
 
     // Aura según tier — entre más raro, más grande y más intensa (y
     // legendarios/épicos además tienen un anillo de "chispas" girando).
+    // Para legendario, el color Y la forma de las chispas salen de su
+    // propio tema (ver LEGENDARY_AURA_THEMES/auraThemeFor) — cada pieza
+    // única se ve distinta, no todas del mismo dorado genérico.
+    const legendaryTheme = n.tierKey === "legendary" ? auraThemeFor(n) : null;
+    const auraColor = legendaryTheme ? legendaryTheme.glowColor : n.tier.color;
     const auraIntensity = { uncommon: 0.18, rare: 0.34, epic: 0.55, legendary: 0.95 }[n.tierKey] || 0;
     if (auraIntensity > 0) {
       ctx.save();
@@ -1109,18 +1357,20 @@ const R3Game = (() => {
       const extra = { uncommon: 8, rare: 16, epic: 27, legendary: 46 }[n.tierKey] || 8;
       const alphaByte = Math.min(255, Math.round((0.55 + pulse * 0.35) * auraIntensity * 255));
       const g = ctx.createRadialGradient(0, 0, n.size / 2, 0, 0, n.size / 2 + extra);
-      g.addColorStop(0, n.tier.color + alphaByte.toString(16).padStart(2, "0"));
+      g.addColorStop(0, auraColor + alphaByte.toString(16).padStart(2, "0"));
       g.addColorStop(1, "transparent");
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(0, 0, n.size / 2 + extra, 0, Math.PI * 2);
       ctx.fill();
 
-      if (n.tierKey === "legendary" || n.tierKey === "epic") {
-        const rays = n.tierKey === "legendary" ? 8 : 5;
-        const rot = performance.now() / (n.tierKey === "legendary" ? 500 : 700);
-        ctx.strokeStyle = n.tier.color;
-        ctx.lineWidth = n.tierKey === "legendary" ? 2.5 : 2;
+      if (legendaryTheme) {
+        drawLegendarySparks(n, legendaryTheme, extra, pulse);
+      } else if (n.tierKey === "epic") {
+        const rays = 5;
+        const rot = performance.now() / 700;
+        ctx.strokeStyle = auraColor;
+        ctx.lineWidth = 2;
         ctx.globalAlpha = 0.5 + pulse * 0.3;
         for (let i = 0; i < rays; i++) {
           const a = rot + (i / rays) * Math.PI * 2;
@@ -1191,6 +1441,106 @@ const R3Game = (() => {
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, Math.PI * 2);
       ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Dibuja el objeto que un épico/legendario le lanzó al avatar — cada
+   * "kind" tiene su propia silueta (nada de imágenes externas, todo
+   * formas de canvas) para que se note variedad real, no un solo
+   * proyectil repetido. Ver THROW_OBJECT_KINDS/throwAtAvatar.
+   */
+  function drawEnemyThrow(p) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+    ctx.lineJoin = "round";
+
+    if (p.kind === "banana") {
+      ctx.fillStyle = "#f5d94e";
+      ctx.strokeStyle = "#8a6a1a";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-10, 6);
+      ctx.quadraticCurveTo(0, -14, 12, -6);
+      ctx.quadraticCurveTo(2, 2, -4, 10);
+      ctx.quadraticCurveTo(-8, 9, -10, 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (p.kind === "manzana") {
+      ctx.fillStyle = "#e34848";
+      ctx.beginPath();
+      ctx.arc(0, 1, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#5a3a1a";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -7);
+      ctx.lineTo(2, -13);
+      ctx.stroke();
+      ctx.fillStyle = "#5eba5e";
+      ctx.beginPath();
+      ctx.ellipse(5, -10, 4, 2.4, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (p.kind === "basura") {
+      ctx.fillStyle = "#8f9aa8";
+      ctx.beginPath();
+      ctx.moveTo(-8, -9);
+      ctx.lineTo(8, -8);
+      ctx.lineTo(7, 10);
+      ctx.lineTo(-7, 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#4a525c";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-8, -9); ctx.lineTo(8, -8);
+      ctx.moveTo(-6, -4); ctx.lineTo(6, -3);
+      ctx.moveTo(-6, 2); ctx.lineTo(6, 3);
+      ctx.stroke();
+    } else if (p.kind === "roca") {
+      ctx.fillStyle = "#7a7a86";
+      ctx.beginPath();
+      ctx.moveTo(-9, -2); ctx.lineTo(-3, -10); ctx.lineTo(7, -7);
+      ctx.lineTo(9, 3); ctx.lineTo(2, 10); ctx.lineTo(-8, 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#4a4a52";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    } else if (p.kind === "hueso") {
+      ctx.fillStyle = "#f2ecdd";
+      ctx.strokeStyle = "#b8ad8f";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-9, 0);
+      ctx.lineTo(9, 0);
+      ctx.stroke();
+      ctx.lineWidth = 6;
+      ctx.lineCap = "round";
+      ctx.strokeStyle = "#f2ecdd";
+      ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(-6, 0); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(9, 0); ctx.stroke();
+      [[-9, -3], [-9, 3], [9, -3], [9, 3]].forEach(([x, y]) => {
+        ctx.beginPath();
+        ctx.arc(x, y, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    } else {
+      // "tomate"
+      ctx.fillStyle = "#e0503a";
+      ctx.beginPath();
+      ctx.arc(0, 0, 8.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#5eba5e";
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.ellipse(Math.cos(a) * 3, -7 + Math.sin(a) * 2, 3, 1.6, a, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.restore();
   }
@@ -1304,6 +1654,7 @@ const R3Game = (() => {
     for (const n of falling) drawFalling(n);
     drawParticles();
     for (const p of projectiles) drawProjectile(p);
+    for (const p of enemyThrows) drawEnemyThrow(p);
     drawFloatTexts();
     drawAvatar();
 
@@ -1326,6 +1677,7 @@ const R3Game = (() => {
     collection = coll;
     falling = [];
     projectiles = [];
+    enemyThrows = [];
     particles = [];
     floatTexts = [];
     score = 0;

@@ -39,6 +39,17 @@ import { ethers } from "ethers";
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import sharp from "sharp";
+
+// El juego nunca muestra un r3tard más grande que esto en pantalla (los que
+// caen se recortan a un lienzo de 256×256, ver processCutout() en game.js;
+// el fondo giratorio se estira a pantalla completa pero va oscurecido al
+// 55%+55%, así que el detalle fino no se nota). Bajar cada imagen a este
+// tamaño ANTES de servirla es lo que de verdad la hace rápida de descargar
+// para cada jugador — el arte original de la colección puede pesar cientos
+// de KB o más por archivo; a este tamaño y en WebP pesa unos pocos KB.
+const GAME_IMAGE_MAX_SIZE = 640;
+const GAME_IMAGE_WEBP_QUALITY = 82;
 
 // ---- Mantener en sync con web/js/config.js ------------------------------
 const NFT_CONTRACT_ADDRESS = "0x200723A706de0013316E5cd8EBa2b3f53DD90c29";
@@ -252,6 +263,21 @@ function computeRarity(items) {
     it.rarityTier = tier.key;
     it.rarityRank = idx + 1;
   });
+
+  // Los 1/1 "Certified" (piezas únicas con nombre propio, ej. "Cranium",
+  // "Angel", "Banana") son casos especiales curados a mano por el
+  // proyecto — no todos caen matemáticamente dentro del 1% más raro por
+  // frecuencia de rasgos (con ~38 de 1033, son más del 1% por definición),
+  // pero el usuario los quiere a TODOS como legendarios, mostrando su
+  // nombre propio. Se fuerza el tier después del cálculo normal — el
+  // resto de la colección conserva su ranking/percentiles tal cual.
+  for (const it of items) {
+    const certAttr = it.attributes.find((a) => a.trait_type === "Certified");
+    if (certAttr) {
+      it.rarityTier = "legendary";
+      it.certifiedName = certAttr.value;
+    }
+  }
   return items;
 }
 
@@ -263,6 +289,26 @@ function extFromContentType(ct) {
   if (ct.includes("webp")) return "webp";
   if (ct.includes("svg")) return "svg";
   return "img";
+}
+
+/**
+ * Reduce cualquier imagen (buffer + su tipo original) a un WebP chiquito
+ * y liviano, del tamaño máximo que el juego realmente necesita — ver
+ * GAME_IMAGE_MAX_SIZE arriba. Si por lo que sea `sharp` no puede procesar
+ * ese archivo en particular (formato raro, SVG malformado, etc.), se
+ * devuelve `null` y quien llama debe usar el archivo ORIGINAL sin tocar
+ * — nunca hay que dejar un token sin imagen solo por no poder compactarla.
+ */
+async function shrinkForGame(buf) {
+  try {
+    const out = await sharp(buf, { limitInputPixels: false })
+      .resize(GAME_IMAGE_MAX_SIZE, GAME_IMAGE_MAX_SIZE, { fit: "inside", withoutEnlargement: true })
+      .webp({ quality: GAME_IMAGE_WEBP_QUALITY })
+      .toBuffer();
+    return out;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -283,6 +329,21 @@ function extFromContentType(ct) {
  * ya no depende de esos encabezados para nada: es un archivo local como
  * cualquier otro.
  */
+async function writeGameImage(tokenId, rawBuf, fallbackExt) {
+  const small = await shrinkForGame(rawBuf);
+  if (small) {
+    const filename = `${tokenId}.webp`;
+    await writeFile(join(IMAGES_DIR, filename), small);
+    return `data/images/${filename}`;
+  }
+  // Respaldo: `sharp` no pudo con este archivo en particular — se sirve
+  // el original tal cual llegó, sin comprimir. Mejor una imagen pesada
+  // que ninguna imagen.
+  const filename = `${tokenId}.${fallbackExt}`;
+  await writeFile(join(IMAGES_DIR, filename), rawBuf);
+  return `data/images/${filename}`;
+}
+
 async function downloadImage(tokenId, uri) {
   if (!uri) return "";
   if (uri.startsWith("data:")) {
@@ -291,9 +352,7 @@ async function downloadImage(tokenId, uri) {
     const [, mime, isB64, payload] = match;
     const ext = extFromContentType(mime);
     const buf = isB64 ? Buffer.from(payload, "base64") : Buffer.from(decodeURIComponent(payload), "utf8");
-    const filename = `${tokenId}.${ext}`;
-    await writeFile(join(IMAGES_DIR, filename), buf);
-    return `data/images/${filename}`;
+    return writeGameImage(tokenId, buf, ext);
   }
   const candidates = resolveCandidates(uri);
   for (const url of candidates) {
@@ -306,9 +365,7 @@ async function downloadImage(tokenId, uri) {
       const ct = res.headers.get("content-type") || "";
       const ext = extFromContentType(ct);
       const buf = Buffer.from(await res.arrayBuffer());
-      const filename = `${tokenId}.${ext}`;
-      await writeFile(join(IMAGES_DIR, filename), buf);
-      return `data/images/${filename}`;
+      return await writeGameImage(tokenId, buf, ext);
     } catch {
       clearTimeout(t);
       // probamos la siguiente candidata (otro gateway)

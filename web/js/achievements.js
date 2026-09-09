@@ -54,6 +54,7 @@ const R3Achievements = (() => {
       tokenId: info.tokenId,
       name: info.name || `r3tards #${info.tokenId}`,
       image: info.image || "",
+      isCertified: Boolean(info.isCertified),
       tierKey: info.tierKey || "common",
       tierLabel: info.tierLabel || "",
       points: info.points || 0,

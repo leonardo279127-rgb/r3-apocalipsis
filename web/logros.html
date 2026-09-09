@@ -92,7 +92,7 @@
               <div class="kill-card-img">
                 ${k.image ? `<img src="${k.image}" alt="${escapeHtml(k.name)}" loading="lazy" />` : `<div class="kill-card-noimg">?</div>`}
               </div>
-              <div class="kill-card-name">${escapeHtml(k.name)}</div>
+              <div class="kill-card-name">${escapeHtml(k.name)}${k.isCertified ? ' <span class="kill-card-certified" title="Pieza 1/1 · Certified">★ 1/1</span>' : ""}</div>
               <div class="kill-card-tier">${TIER_LABELS[k.tierKey] || k.tierKey}</div>
               <div class="kill-card-count">×${k.timesKilled}</div>
             </div>

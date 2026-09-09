@@ -146,6 +146,15 @@ const R3Audio = (() => {
     tone({ freq: 200, type: "sawtooth", dur: 0.3, decay: 0.32, gain: 0.3, glideTo: 60 });
   }
 
+  // "Splat" — al jugador le llega un objeto lanzado (plátano, manzana,
+  // basura...) desde un épico/legendario. Distinto de missLife (dejar
+  // caer uno) y de hitImpact (golpear a uno): un impacto húmedo/sordo.
+  function playerHit() {
+    if (!unlocked) return;
+    noiseHit({ dur: 0.16, gain: 0.4, filterFreq: 700 });
+    tone({ freq: 160, type: "sine", dur: 0.18, decay: 0.2, gain: 0.28, glideTo: 70 });
+  }
+
   function waveUp() {
     if (!unlocked) return;
     [392, 494, 587, 784].forEach((f, i) => tone({ freq: f, type: "triangle", dur: 0.14, decay: 0.16, gain: 0.22, delay: i * 0.07 }));
@@ -156,7 +165,7 @@ const R3Audio = (() => {
     [392, 349, 294, 220].forEach((f, i) => tone({ freq: f, type: "sawtooth", dur: 0.35, decay: 0.4, gain: 0.3, delay: i * 0.18 }));
   }
 
-  return { unlock, uiClick, coinPay, shoot, hitImpact, death, rareSpawnAlert, legendarySpawnAlert, missLife, waveUp, gameOver };
+  return { unlock, uiClick, coinPay, shoot, hitImpact, death, rareSpawnAlert, legendarySpawnAlert, missLife, playerHit, waveUp, gameOver };
 })();
 
 window.R3Audio = R3Audio;

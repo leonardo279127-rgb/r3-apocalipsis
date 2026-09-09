@@ -265,6 +265,18 @@ const R3Loader = (() => {
       it.rarityTier = tier.key;
       it.rarityRank = idx + 1;
     });
+
+    // Los 1/1 "Certified" (piezas únicas con nombre propio) se fuerzan a
+    // legendario y guardan su nombre propio — ver el mismo bloque en
+    // tools/build-collection.mjs (debe hacer EXACTAMENTE lo mismo, esto
+    // es el respaldo cuando no existe el snapshot estático).
+    for (const it of items) {
+      const certAttr = it.attributes.find((a) => a.trait_type === "Certified");
+      if (certAttr) {
+        it.rarityTier = "legendary";
+        it.certifiedName = certAttr.value;
+      }
+    }
     return items;
   }
 

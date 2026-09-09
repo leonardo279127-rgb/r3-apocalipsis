@@ -391,8 +391,15 @@
     const b = document.createElement("div");
     b.className = "rare-banner";
     b.style.color = info.color;
-    const verb = info.tierKey === "legendary" ? "¡LEGENDARIO DETECTADO!" : info.tierKey === "epic" ? "¡ÉPICO A LA VISTA!" : "¡RARO CAYENDO!";
-    b.innerHTML = `${verb}<br><span style="font-size:0.6em">r3tards #${info.tokenId}</span>`;
+    // Los "Certified" son las piezas 1/1 de verdad únicas de la colección
+    // (ej. "Cranium", "Angel") — el aviso grande los llama por su nombre
+    // propio en vez del genérico "¡LEGENDARIO DETECTADO!", para que se
+    // sienta el momento especial de que salió justo esa pieza.
+    const verb = info.tierKey === "legendary"
+      ? (info.isCertified ? `¡LEGENDARIO "${info.name.toUpperCase()}"!` : "¡LEGENDARIO DETECTADO!")
+      : info.tierKey === "epic" ? "¡ÉPICO A LA VISTA!" : "¡RARO CAYENDO!";
+    const sub = info.isCertified ? "Pieza 1/1 · Certified" : `r3tards #${info.tokenId}`;
+    b.innerHTML = `${verb}<br><span style="font-size:0.6em">${sub}</span>`;
     bannerLayer.appendChild(b);
     setTimeout(() => b.remove(), 2300);
   }

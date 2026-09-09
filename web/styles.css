@@ -503,6 +503,18 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.kill-card-certified {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #ffd166;
+  border: 1px solid #ffd166;
+  border-radius: 999px;
+  padding: 0 5px;
+  margin-left: 3px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
 .kill-card-tier {
   font-size: 0.72rem;
   color: var(--tier-color, var(--text-dim));
