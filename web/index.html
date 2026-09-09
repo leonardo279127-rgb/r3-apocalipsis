@@ -49,6 +49,17 @@
       </div>
 
       <p id="wallet-status" class="wallet-status">No conectado</p>
+
+      <!-- Alias público on-chain: se usa como nombre en el ranking/medallas
+           en vez de mostrar la dirección completa de la wallet. Solo
+           aparece una vez conectada la wallet (y con el contrato ya
+           configurado — sin contrato no hay dónde guardarlo). -->
+      <div id="alias-row" class="alias-row" hidden>
+        <span class="alias-current" id="alias-current">Sin alias todavía</span>
+        <input id="alias-input" class="alias-input" type="text" maxlength="20" placeholder="Tu alias (máx. 20)" />
+        <button id="btn-save-alias" class="btn btn-secondary btn-small">💾 Guardar alias</button>
+      </div>
+
       <p id="menu-error" class="menu-error" hidden></p>
       <button id="btn-retry-collection" class="btn btn-secondary" hidden>🔄 Reintentar carga de la colección</button>
 
@@ -66,6 +77,8 @@
         Contrato de pago verificable on-chain · Colección real de
         <a href="https://opensea.io/collection/r3tardsnft" target="_blank" rel="noopener">r3tardsnft en OpenSea</a>
         · <a href="logros.html">🏆 Ver mis logros</a>
+        · <a href="ranking.html">🥇 Ranking global</a>
+        · <a href="medallas.html">🎖️ Medallas</a>
       </p>
     </div>
   </section>
@@ -105,10 +118,39 @@
       <p class="gameover-score">Puntaje final: <span id="go-score">0</span></p>
       <p class="gameover-sub">Mejor combo: <span id="go-combo">0</span>x · Oleada alcanzada: <span id="go-wave">1</span> · r3tards distintos: <span id="go-progress">0/0</span></p>
       <ul class="kill-breakdown" id="go-breakdown"></ul>
+
+      <!-- Logros conseguidos ESTA partida (independiente de si ya se
+           guardaron on-chain o no — esto solo muestra lo que la partida
+           misma ya cumplió). -->
+      <div id="go-achievements-earned" class="go-achievements" hidden>
+        <div class="go-achievements-title">🎖️ Logros conseguidos esta partida</div>
+        <ul id="go-achievements-list" class="achv-badges"></ul>
+      </div>
+
+      <!-- Guardar puntaje/logros on-chain: solo aparece con wallet
+           conectada y el contrato ya configurado (en modo prueba no hay
+           nada que guardar, es gratis y sin wallet). -->
+      <div id="go-onchain" class="go-onchain" hidden>
+        <p id="go-onchain-status" class="wallet-status"></p>
+        <div class="menu-actions">
+          <button id="btn-save-score" class="btn btn-secondary">🏆 Guardar puntaje en el ranking</button>
+          <button id="btn-save-achievements" class="btn btn-secondary">🎖️ Guardar logros nuevos</button>
+        </div>
+      </div>
+      <div id="go-connect-hint" class="go-onchain" hidden>
+        <p class="wallet-status">Conecta tu wallet para guardar este puntaje y tus logros en el ranking global.</p>
+        <div class="menu-actions">
+          <button id="btn-connect-gameover" class="btn btn-secondary">🔌 Conectar wallet</button>
+        </div>
+      </div>
+
       <div class="menu-actions">
         <button id="btn-play-again" class="btn btn-primary">🔁 Jugar de nuevo (— MON)</button>
         <button id="btn-back-menu" class="btn btn-secondary">Menú</button>
       </div>
+      <p class="footer-note">
+        <a href="ranking.html">🥇 Ranking global</a> · <a href="medallas.html">🎖️ Medallas</a>
+      </p>
     </div>
   </section>
 
@@ -125,6 +167,7 @@
   <script src="js/audio.js"></script>
   <script src="js/wallet.js"></script>
   <script src="js/achievements.js"></script>
+  <script src="js/achievements-onchain.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>
 </body>

@@ -527,3 +527,111 @@ html, body {
   color: var(--text-dim);
   margin-top: 2px;
 }
+
+/* ---------------- ALIAS (menú) ---------------- */
+.alias-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.alias-current {
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+.alias-input {
+  font-family: 'Kalam', cursive, sans-serif;
+  font-size: 0.92rem;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 2px solid var(--line);
+  background: var(--ink);
+  color: var(--paper);
+  width: 160px;
+  max-width: 46vw;
+}
+.alias-input:focus { outline: none; border-color: var(--purple-light); }
+.btn-small { padding: 8px 16px; font-size: 0.88rem; }
+
+/* ---------------- LOGROS DE PARTIDA (game over) + on-chain ---------------- */
+.go-achievements { margin: 0 0 16px; }
+.go-achievements-title { font-size: 0.9rem; color: var(--text-dim); margin-bottom: 8px; font-weight: 700; }
+.achv-badges {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.achv-badges li {
+  background: var(--ink);
+  border: 2px solid #ffd166;
+  color: #ffd166;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.go-onchain { margin: 4px 0 16px; }
+.go-onchain .wallet-status { margin-bottom: 8px; }
+
+/* ---------------- RANKING / MEDALLAS (ranking.html, medallas.html) ---------------- */
+.rank-list {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.rank-list th, .rank-list td {
+  padding: 9px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.92rem;
+}
+.rank-list th { color: var(--text-dim); text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.6px; }
+.rank-list td.rank-pos { font-weight: 700; color: #ffd166; width: 2.6em; }
+.rank-list td.rank-score { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.rank-list tr.rank-me { background: rgba(110, 84, 255, 0.18); }
+.rank-alias { font-weight: 700; }
+.rank-addr { color: var(--text-dim); font-size: 0.78rem; display: block; }
+
+.medal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+  text-align: left;
+}
+.medal-card {
+  background: var(--ink-soft);
+  border: 2px solid var(--line);
+  border-radius: 18px;
+  padding: 14px 16px;
+  opacity: 0.55;
+}
+.medal-card.medal-unlocked {
+  opacity: 1;
+  border-color: #ffd166;
+  box-shadow: 0 0 18px rgba(255, 209, 102, 0.25);
+}
+.medal-card-name { font-weight: 700; font-size: 0.98rem; display: flex; align-items: center; gap: 6px; }
+.medal-card-desc { font-size: 0.82rem; color: var(--text-dim); margin-top: 4px; line-height: 1.4; }
+.medal-card-scope {
+  display: inline-block;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-top: 8px;
+}
+.medal-card-date { font-size: 0.72rem; color: #ffd166; margin-top: 6px; }
+
+.rank-empty { text-align: center; color: var(--text-dim); padding: 24px; }
+.rank-table-wrap { width: 100%; overflow-x: auto; }

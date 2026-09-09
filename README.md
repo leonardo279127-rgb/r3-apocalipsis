@@ -8,8 +8,8 @@ Esta guía asume que **no tienes experiencia con hosting ni con despliegue de co
 
 ## 0) Lo que ya está listo
 
-- `contracts/R3Apocalipsis.sol` → el contrato que cobra la entrada (10 MON) y guarda los fondos hasta que tú los retiras.
-- `web/` → el sitio completo del juego (HTML/CSS/JS). Es un sitio **estático**: no necesita servidor, base de datos ni backend. Por eso se puede alojar gratis y "siempre activo" en GitHub Pages.
+- `contracts/R3Apocalipsis.sol` → el contrato que cobra la entrada (10 MON), guarda los fondos hasta que tú los retiras, y guarda alias/puntajes/logros globales (ver sección 7.10).
+- `web/` → el sitio completo del juego (HTML/CSS/JS). Es un sitio **estático**: no necesita servidor, base de datos ni backend. Por eso se puede alojar gratis y "siempre activo" en GitHub Pages. Incluye `index.html` (el juego), `logros.html` (tus kills en este navegador), `ranking.html` (top de puntajes global, on-chain) y `medallas.html` (logros globales, on-chain).
 - `tools/` → el script que precarga la colección (`build-collection.mjs`) para que el juego arranque al instante en vez de leer la cadena cada vez.
 - `.github/workflows/deploy.yml` → hace que lo anterior pase **solo, automáticamente**, cada vez que subes archivos: genera la precarga y publica el sitio, sin que tengas que correr nada en tu computadora (paso 4).
 - Todo ya está configurado para la colección `r3tardsnft` (contrato `0x200723A706de0013316E5cd8EBa2b3f53DD90c29`) y para que los fondos terminen en la wallet:
@@ -62,7 +62,8 @@ Yo no puedo desplegar el contrato por ti — desplegar significa firmar una tran
    El precio se lee directamente de `playPrice()` del contrato; no se duplica en el frontend.
    ```
    en este mismo archivo (deben coincidir siempre).
-4. Guarda el archivo.
+4. Busca también la línea `GAME_CONTRACT_DEPLOY_BLOCK: 0,` un poco más abajo y reemplaza el `0` por el número de bloque en el que quedó el despliegue (Remix te lo muestra en el detalle de la transacción de "Deploy", o búscalo en https://monadscan.com pegando la dirección del contrato). No es obligatorio — con `0` el ranking y las medallas (ver sección 7.10) igual funcionan — pero hace que `ranking.html`/`medallas.html` carguen mucho más rápido, porque dejan de escanear bloques de antes de que el contrato existiera.
+5. Guarda el archivo.
 
 Eso es todo lo que hay que tocar para que el cobro funcione. El resto del juego ya lee la colección r3tards directo desde la cadena, así que no hace falta subir imágenes ni metadata a mano — pero eso también es lo que hace que la primera carga sea lenta (siguiente paso, para arreglarlo).
 
@@ -278,7 +279,31 @@ Verificación: partida de prueba con el reloj del juego acelerado artificialment
 
 **Verificación de las cuatro cosas**: instrumenté el código para confirmar que las imágenes cachean y se recortan bien con WebP (probado con una imagen real de dos tonos, no un color sólido — un color sólido plano hace que el recorte de fondo la vuelva 100% transparente, eso fue justamente la falsa alarma que investigué y descarté en 7.8); armé una colección de prueba con un token "Certified" simulado y confirmé que la etiqueta y el aviso grande muestran su nombre; forcé que casi todo lo que cayera fuera legendario y confirmé visualmente (capturas) que salen colores/formas de aura distintas; y forcé una tanda de épicos/legendarios contra un avatar quieto, confirmando que las vidas bajan cuando un objeto conecta — todo sin errores de consola.
 
+## 7.10) Ranking global y medallas — guardados on-chain, con alias y wallet
+
+Pediste que el puntaje y los logros se guarden de verdad para todos (no solo en tu propio navegador), con un alias elegido por cada jugador, y dos páginas nuevas: una con el top de puntajes y otra con los logros. Como el sitio sigue siendo 100% estático (sin servidor propio), la única forma de que esto sea de verdad global es escribiéndolo en la propia cadena — la misma decisión de fondo que ya regía todo lo demás en este proyecto.
+
+**Qué se agregó al contrato** (`contracts/R3Apocalipsis.sol`): tres cosas nuevas, cada una con su propio evento para poder leerlas después desde cualquier navegador sin backend:
+- `setAlias(alias)` — pone o cambia tu alias público (máx. 20 caracteres), para que el ranking te muestre por nombre en vez de tu dirección completa.
+- `submitScore(puntaje)` — guarda un nuevo mejor puntaje propio, **solo si supera tu récord anterior** (así nunca pagas gas por un puntaje que no mejora nada).
+- `unlockAchievements(ids)` — marca uno o varios logros como desbloqueados de una sola transacción (batch, para no pagar gas por cada uno). Los que ya tenías se ignoran en silencio, nunca se duplica el evento.
+
+Ninguna de las tres cuesta nada salvo el gas normal de una transacción chica — y nunca se dispara sola: siempre aparece como un botón explícito ("Guardar puntaje en el ranking" / "Guardar logros nuevos") que tú apruebas en tu wallet, igual que el pago de la partida.
+
+**Los 11 logros** (lista completa y editable en `web/js/achievements-onchain.js`): Primera Sangre, Cazador de Raros, Depredador Épico, Leyenda Personal, Certificado (matar uno de los 38 "Certified"), Racha x10, Maratonista (sobrevivir 10 min seguidos), Milésimo Punto, Multi-Legendario (3 legendarios en una partida), y dos de largo plazo — Cazador de Leyendas (10 legendarios en total) y Colección Completa (los 1033 distintos) — que se calculan sobre el conteo acumulado de kills de tu navegador (`achievements.js`, el mismo que ya usa la página de "Mis logros"). Esto significa que la parte de "cuánto llevas acumulado" para esos dos últimos sigue siendo local a cada navegador (misma limitación ya conocida), pero el **logro en sí**, una vez guardado, queda global y permanente para siempre.
+
+**Dos páginas nuevas**:
+- `ranking.html` — el top de puntajes de todos los jugadores, leyendo el evento `ScoreSubmitted` directo de la cadena. Muestra el alias de quien lo tenga puesto, o su dirección acortada si no.
+- `medallas.html` — la lista completa de los 11 logros, marcando cuáles ya tiene desbloqueados la wallet conectada (con fecha), más un top global de "quién tiene más logros" leyendo `AchievementUnlocked`.
+
+Ninguna de las dos necesita servidor: ambas leen los eventos directo de un RPC público de Monad (igual que ya hacía el resto del sitio), partiendo el rango de bloques en pedazos y rotando de RPC si alguno falla o rechaza el rango — así no dependen de que un solo RPC público aguante la consulta completa de una sola vez.
+
+**Verificación antes de entregar esto**: como esta es la primera vez que se toca el contrato después del pago inicial (o sea, la primera vez que hay un costo de gas real involucrado en un cambio), lo probé en una cadena local (Hardhat, simulada, sin tocar Monad real ni gastar MON de verdad) antes de tocar nada del sitio: desplegué el contrato modificado, y confirmé uno por uno — que `playGame()` sigue funcionando exactamente igual que antes (regresión); que `setAlias()` guarda y deja cambiar el alias, y rechaza uno vacío o de más de 20 caracteres; que `submitScore()` solo acepta puntajes que mejoran el récord propio (y rechaza los que no); que `unlockAchievements()` desbloquea logros nuevos en batch y **no vuelve a emitir el evento** de uno que ya tenías; que los tres eventos nuevos se pueden leer correctamente con el mismo mecanismo que usan `ranking.html`/`medallas.html`; y que `pause()`/`unpause()`/`withdraw()` (las funciones de administrador que ya existían) siguen intactas. Todo pasó. Aparte, probé por separado (con un servidor de prueba falso) que la lógica de "partir el rango de bloques y rotar de RPC si algo falla" de `ranking.html`/`medallas.html` realmente reintenta y rota como debe, sin necesidad de una cadena real para eso.
+
+**Aviso importante para el despliegue**: como estos cambios están en el contrato (no solo en el sitio) y **todavía no lo has desplegado**, esta es tu única oportunidad de tener el ranking/logros desde el primer despliegue — si ya lo hubieras desplegado antes, necesitarías desplegar un contrato NUEVO (con una dirección distinta) para agregar esto después, y los datos de pago del contrato viejo no se transferirían solos. Sigue la sección 1 de este README normalmente; ya incluye este contrato actualizado.
+
+**Misma limitación honesta que ya existía** (ver "Checklist de seguridad", sección 6): como no hay servidor que valide que una partida fue real, alguien técnico podría llamar `submitScore()`/`unlockAchievements()` directo desde la consola del navegador con números inventados, sin haber jugado. No hay forma de cerrar esto al 100% sin un backend propio (fuera del alcance de este proyecto). Como no hay ningún premio en dinero ligado al puntaje o a los logros, el peor caso es alguien mintiendo sobre su propio historial en un juego gratis de ver — no hay forma de robar fondos ni de afectar a otros jugadores con esto.
+
 ## 8) Ideas para una v2 (no incluidas todavía)
 
-- Marcador global (leaderboard) — hoy el mejor puntaje es solo local a cada navegador. Para uno global de verdad hace falta un backend pequeño o escribir puntajes on-chain (cuesta gas extra por partida).
 - Vidas/dificultad ajustable desde `config.js` (`MAX_LIVES`, tabla `TIERS`) por si quieres rebalancear el juego sin tocar el motor.

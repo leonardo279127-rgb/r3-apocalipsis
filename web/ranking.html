@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Ranking global — R3 APOCALIPSIS</title>
+<meta name="description" content="Los mejores puntajes de R3 Apocalipsis, guardados on-chain en Monad Mainnet y visibles para todos." />
+<link rel="icon" href="assets/monad-orb.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <section class="screen active logros-screen">
+    <div class="menu-bg-fx" aria-hidden="true"></div>
+
+    <div class="menu-card logros-card">
+      <h1 class="title" style="font-size: clamp(1.6rem, 6vw, 2.2rem);">🥇 <span class="title-r3">Ranking</span> <span class="title-apoc">Global</span></h1>
+      <p class="subtitle">
+        Los mejores puntajes de <strong>todos los jugadores</strong>, leídos directo de la
+        cadena (evento <code>ScoreSubmitted</code> del contrato) — cualquiera que abra este
+        link ve el mismo ranking, no depende de este navegador ni de este dispositivo.
+      </p>
+
+      <div class="menu-actions">
+        <button id="btn-connect-ranking" class="btn btn-primary">🔌 Conectar wallet</button>
+        <a href="index.html" class="btn btn-secondary">🎮 Volver al juego</a>
+        <a href="medallas.html" class="btn btn-secondary">🎖️ Medallas</a>
+      </div>
+
+      <p id="ranking-status" class="wallet-status">No conectado</p>
+      <p id="ranking-error" class="menu-error" hidden></p>
+      <div id="ranking-progress" class="progress-wrap" hidden>
+        <div class="progress-label" id="ranking-progress-label">Leyendo puntajes on-chain…</div>
+        <div class="progress-track"><div class="progress-bar" id="ranking-progress-bar"></div></div>
+      </div>
+    </div>
+
+    <div id="ranking-results" class="logros-results" hidden>
+      <div class="menu-card">
+        <div class="rank-table-wrap">
+          <table class="rank-list" id="rank-table">
+            <thead>
+              <tr><th>#</th><th>Jugador</th><th style="text-align:right">Puntaje</th></tr>
+            </thead>
+            <tbody id="rank-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/abis.js"></script>
+  <script src="js/wallet.js"></script>
+  <script src="js/onchain-events.js"></script>
+  <script>
+    (function () {
+      const CFG = window.R3_CONFIG;
+      const btnConnect = document.getElementById("btn-connect-ranking");
+      const statusEl = document.getElementById("ranking-status");
+      const errorEl = document.getElementById("ranking-error");
+      const progressWrap = document.getElementById("ranking-progress");
+      const progressBar = document.getElementById("ranking-progress-bar");
+      const progressLabel = document.getElementById("ranking-progress-label");
+      const resultsEl = document.getElementById("ranking-results");
+      const tbody = document.getElementById("rank-tbody");
+
+      let myAddress = null;
+
+      function showError(msg) {
+        errorEl.textContent = msg;
+        errorEl.hidden = false;
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+      }
+
+      function shortAddr(addr) {
+        return addr.slice(0, 6) + "…" + addr.slice(-4);
+      }
+
+      async function loadRanking() {
+        if (!R3Wallet.isContractConfigured()) {
+          showError(
+            "El contrato del juego todavía no está configurado (GAME_CONTRACT_ADDRESS en js/config.js sigue siendo el placeholder), así que todavía no hay ranking que mostrar."
+          );
+          return;
+        }
+        progressWrap.hidden = false;
+        try {
+          const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, window.R3_ABIS.GAME, R3Events.getProvider());
+          const fromBlock = Number(CFG.GAME_CONTRACT_DEPLOY_BLOCK) || 0;
+          const toBlock = await R3Events.getLatestBlock();
+
+          const [scoreLogs, aliasLogs] = await Promise.all([
+            R3Events.queryLogsChunked(contract, "ScoreSubmitted", fromBlock, toBlock, (done, total) => {
+              progressLabel.textContent = `Leyendo puntajes on-chain…`;
+              progressBar.style.width = Math.round((done / total) * 50) + "%";
+            }),
+            R3Events.queryLogsChunked(contract, "AliasSet", fromBlock, toBlock, (done, total) => {
+              progressLabel.textContent = `Leyendo alias on-chain…`;
+              progressBar.style.width = 50 + Math.round((done / total) * 50) + "%";
+            }),
+          ]);
+
+          // Cada evento ScoreSubmitted solo se emite cuando el puntaje MEJORA
+          // el récord anterior de esa wallet (ver submitScore() en el
+          // contrato) — así que el ÚLTIMO evento de cada wallet ya es su
+          // mejor puntaje actual, no hace falta comparar valores.
+          const bestByAddr = new Map();
+          for (const log of scoreLogs) {
+            const addr = log.args.player.toLowerCase();
+            bestByAddr.set(addr, Number(log.args.score));
+          }
+          const aliasByAddr = new Map();
+          for (const log of aliasLogs) {
+            aliasByAddr.set(log.args.player.toLowerCase(), log.args.newAlias);
+          }
+
+          progressWrap.hidden = true;
+          resultsEl.hidden = false;
+
+          if (bestByAddr.size === 0) {
+            tbody.innerHTML = "";
+            resultsEl.innerHTML = `<div class="menu-card"><p class="rank-empty">Todavía nadie ha guardado un puntaje en el ranking. ¡Sé el primero desde el juego!</p></div>`;
+            return;
+          }
+
+          const ranked = [...bestByAddr.entries()].sort((a, b) => b[1] - a[1]).slice(0, 200);
+          tbody.innerHTML = ranked
+            .map(([addr, score], i) => {
+              const alias = aliasByAddr.get(addr);
+              const isMe = myAddress && addr === myAddress.toLowerCase();
+              return `
+                <tr class="${isMe ? "rank-me" : ""}">
+                  <td class="rank-pos">${i + 1}</td>
+                  <td>
+                    <span class="rank-alias">${alias ? escapeHtml(alias) : shortAddr(addr)}</span>
+                    ${alias ? `<span class="rank-addr">${shortAddr(addr)}</span>` : ""}
+                  </td>
+                  <td class="rank-score">${score.toLocaleString("es")}</td>
+                </tr>
+              `;
+            })
+            .join("");
+        } catch (err) {
+          console.error(err);
+          progressWrap.hidden = true;
+          showError((err && err.message) || "No se pudo leer el ranking on-chain.");
+        }
+      }
+
+      btnConnect.addEventListener("click", async () => {
+        errorEl.hidden = true;
+        btnConnect.disabled = true;
+        try {
+          const addr = await R3Wallet.connect();
+          myAddress = addr;
+          statusEl.textContent = `Conectado: ${R3Wallet.shortAddress(addr)}`;
+          loadRanking(); // re-lee para poder resaltar tu propia fila
+        } catch (err) {
+          console.error(err);
+          showError((err && err.message) || "No se pudo conectar la wallet.");
+        } finally {
+          btnConnect.disabled = false;
+        }
+      });
+
+      loadRanking();
+    })();
+  </script>
+</body>
+</html>

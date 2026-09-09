@@ -119,7 +119,89 @@ const R3Wallet = (() => {
     return addr.slice(0, 6) + "…" + addr.slice(-4);
   }
 
-  return { hasInjectedWallet, isContractConfigured, connect, getAddress, getPlayPrice, payToPlay, shortAddress };
+  // ------------------------------------------------------------------
+  // Ranking global y logros — cada función de abajo dispara UNA
+  // transacción visible en la wallet (nunca se firma/envía nada en
+  // silencio). Se usan solo cuando el jugador aprieta un botón explícito
+  // ("Guardar en el ranking", "Guardar logros", "Guardar alias").
+  // ------------------------------------------------------------------
+
+  function requireReadyContract() {
+    if (!isContractConfigured()) {
+      throw new Error(
+        "El contrato del juego todavía no está configurado. (Edita GAME_CONTRACT_ADDRESS en js/config.js después de desplegarlo.)"
+      );
+    }
+    if (!signer) throw new Error("Conecta tu wallet primero.");
+  }
+
+  /** Pone/cambia el alias público on-chain (para el ranking). */
+  async function setPlayerAlias(newAlias) {
+    requireReadyContract();
+    await ensureMonadNetwork();
+    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, signer);
+    const tx = await contract.setAlias(newAlias);
+    return await tx.wait();
+  }
+
+  /** Lee el alias on-chain de cualquier wallet (solo lectura, sin costo). */
+  async function getPlayerAlias(address) {
+    if (!isContractConfigured()) return "";
+    const provider = browserProvider || new ethers.BrowserProvider(window.ethereum);
+    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, provider);
+    return await contract.playerAlias(address);
+  }
+
+  /** Guarda un nuevo mejor puntaje propio (el contrato rechaza si no mejora). */
+  async function submitScore(score) {
+    requireReadyContract();
+    await ensureMonadNetwork();
+    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, signer);
+    const tx = await contract.submitScore(score);
+    return await tx.wait();
+  }
+
+  /** Lee el mejor puntaje on-chain de cualquier wallet (solo lectura). */
+  async function getBestScore(address) {
+    if (!isContractConfigured()) return 0n;
+    const provider = browserProvider || new ethers.BrowserProvider(window.ethereum);
+    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, provider);
+    return await contract.bestScore(address);
+  }
+
+  /** Desbloquea uno o varios logros de una sola vez (batch, un solo tx). */
+  async function unlockAchievementsOnChain(ids) {
+    requireReadyContract();
+    if (!Array.isArray(ids) || ids.length === 0) throw new Error("No hay logros para guardar.");
+    await ensureMonadNetwork();
+    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, signer);
+    const tx = await contract.unlockAchievements(ids);
+    return await tx.wait();
+  }
+
+  /** Lee el bitmask de logros on-chain de cualquier wallet (solo lectura). */
+  async function getAchievementsMask(address) {
+    if (!isContractConfigured()) return 0n;
+    const provider = browserProvider || new ethers.BrowserProvider(window.ethereum);
+    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, provider);
+    return await contract.achievementsMask(address);
+  }
+
+  return {
+    hasInjectedWallet,
+    isContractConfigured,
+    connect,
+    getAddress,
+    getPlayPrice,
+    payToPlay,
+    shortAddress,
+    setPlayerAlias,
+    getPlayerAlias,
+    submitScore,
+    getBestScore,
+    unlockAchievementsOnChain,
+    getAchievementsMask,
+  };
 })();
 
 window.R3Wallet = R3Wallet;

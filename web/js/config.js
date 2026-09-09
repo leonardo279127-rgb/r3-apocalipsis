@@ -32,6 +32,18 @@ window.R3_CONFIG = {
   // real, el botón de jugar mostrará un aviso en vez de intentar cobrar.
   GAME_CONTRACT_ADDRESS: "0x0000000000000000000000000000000000dEaD",
 
+  // Número de bloque en el que quedó desplegado el contrato de arriba.
+  // ranking.html y medallas.html lo usan como punto de partida para leer
+  // los eventos ScoreSubmitted/AchievementUnlocked/AliasSet — así solo
+  // escanean los bloques que SÍ pueden tener algo, en vez de la cadena
+  // completa (que muchos RPCs públicos rechazan o limitan por ser un
+  // rango demasiado grande). Ponlo en 0 mientras no sepas el número
+  // exacto (funciona, solo es más lento de cargar); actualízalo con el
+  // número de bloque real apenas despliegues el contrato (Remix te lo
+  // muestra en los detalles de la transacción de deploy, o búscalo en
+  // el explorador con la dirección del contrato).
+  GAME_CONTRACT_DEPLOY_BLOCK: 0,
+
   // Dirección que recibe los fondos al hacer withdraw() en el contrato.
   // Es solo informativa aquí (el contrato ya sabe quién es el owner),
   // se usa para mostrar un texto de transparencia en el menú si quieres.

@@ -31,6 +31,7 @@ const R3Game = (() => {
   let bestCombo = 0;
   let comboTimer = 0;
   let killsByTier = { common: 0, uncommon: 0, rare: 0, epic: 0, legendary: 0 };
+  let certifiedKills = 0; // cuántos "Certified" (1/1) mató en ESTA partida — ver logro "Certificado"
   let legendaryKills = 0; // sube el daño del jugador: 1er legendario → x2, 2do → x3 (tope)
   let legendariesSpawned = 0; // cada legendario que aparece hace que el SIGUIENTE sea más resistente
   let sessionKilledIds = new Set(); // tokenIds distintos matados en ESTA partida — meta: llegar a collection.length (los 1033)
@@ -1017,6 +1018,7 @@ const R3Game = (() => {
       comboTimer = 2.2;
       bestCombo = Math.max(bestCombo, combo);
       killsByTier[n.tierKey] = (killsByTier[n.tierKey] || 0) + 1;
+      if (n.isCertified) certifiedKills += 1;
 
       const comboMul = 1 + Math.min(combo - 1, 8) * 0.12;
       const pts = Math.round(n.pointsValue * comboMul);
@@ -1686,6 +1688,7 @@ const R3Game = (() => {
     combo = 0;
     bestCombo = 0;
     killsByTier = { common: 0, uncommon: 0, rare: 0, epic: 0, legendary: 0 };
+    certifiedKills = 0;
     legendaryKills = 0;
     legendariesSpawned = 0;
     sessionKilledIds = new Set();
@@ -1741,7 +1744,7 @@ const R3Game = (() => {
     running = false;
     if (rafId) cancelAnimationFrame(rafId);
     R3Audio.gameOver();
-    onGameOver({ score, bestCombo, killsByTier, wave, victory: false });
+    onGameOver({ score, bestCombo, killsByTier, certifiedKills, wave, survivalMs: performance.now() - sessionStartTs, victory: false });
   }
 
   // Se llama cuando ya se mató al menos una vez a todos los r3tards
@@ -1752,7 +1755,7 @@ const R3Game = (() => {
     running = false;
     if (rafId) cancelAnimationFrame(rafId);
     R3Audio.waveUp();
-    onGameOver({ score, bestCombo, killsByTier, wave, victory: true });
+    onGameOver({ score, bestCombo, killsByTier, certifiedKills, wave, survivalMs: performance.now() - sessionStartTs, victory: true });
   }
 
   function stop() {

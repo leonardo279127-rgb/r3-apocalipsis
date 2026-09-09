@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Medallas — R3 APOCALIPSIS</title>
+<meta name="description" content="Los logros de R3 Apocalipsis, guardados on-chain en Monad Mainnet y visibles para todos." />
+<link rel="icon" href="assets/monad-orb.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <section class="screen active logros-screen">
+    <div class="menu-bg-fx" aria-hidden="true"></div>
+
+    <div class="menu-card logros-card">
+      <h1 class="title" style="font-size: clamp(1.6rem, 6vw, 2.2rem);">🎖️ <span class="title-r3">Medallas</span></h1>
+      <p class="subtitle">
+        Logros guardados on-chain (evento <code>AchievementUnlocked</code> del contrato) —
+        una vez guardados, quedan permanentes y visibles para cualquiera, aunque cambies
+        de navegador o de computadora.
+      </p>
+
+      <div class="menu-actions">
+        <button id="btn-connect-medallas" class="btn btn-primary">🔌 Conectar wallet</button>
+        <a href="index.html" class="btn btn-secondary">🎮 Volver al juego</a>
+        <a href="ranking.html" class="btn btn-secondary">🥇 Ranking</a>
+      </div>
+
+      <p id="medallas-status" class="wallet-status">No conectado</p>
+      <p id="medallas-error" class="menu-error" hidden></p>
+    </div>
+
+    <div class="logros-results">
+      <div class="menu-card">
+        <h2 class="title" style="font-size:1.2rem; margin-bottom:4px;">Tus medallas</h2>
+        <p class="subtitle" style="margin-bottom:0; font-size:0.92rem;" id="medallas-mine-hint">Conecta tu wallet para ver cuáles ya tienes.</p>
+        <div id="medal-grid" class="medal-grid"></div>
+      </div>
+    </div>
+
+    <div class="logros-results">
+      <div class="menu-card">
+        <h2 class="title" style="font-size:1.2rem;">🏆 Top por cantidad de logros</h2>
+        <div id="medallas-rank-progress" class="progress-wrap" hidden>
+          <div class="progress-label" id="medallas-rank-label">Leyendo logros on-chain…</div>
+          <div class="progress-track"><div class="progress-bar" id="medallas-rank-bar"></div></div>
+        </div>
+        <div class="rank-table-wrap">
+          <table class="rank-list" id="medallas-rank-table" hidden>
+            <thead><tr><th>#</th><th>Jugador</th><th style="text-align:right">Logros</th></tr></thead>
+            <tbody id="medallas-rank-tbody"></tbody>
+          </table>
+        </div>
+        <p class="rank-empty" id="medallas-rank-empty" hidden>Todavía nadie ha guardado un logro on-chain.</p>
+      </div>
+    </div>
+
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/abis.js"></script>
+  <script src="js/wallet.js"></script>
+  <script src="js/onchain-events.js"></script>
+  <script src="js/achievements-onchain.js"></script>
+  <script>
+    (function () {
+      const CFG = window.R3_CONFIG;
+      const btnConnect = document.getElementById("btn-connect-medallas");
+      const statusEl = document.getElementById("medallas-status");
+      const errorEl = document.getElementById("medallas-error");
+      const medalGrid = document.getElementById("medal-grid");
+      const mineHint = document.getElementById("medallas-mine-hint");
+
+      const rankProgress = document.getElementById("medallas-rank-progress");
+      const rankBar = document.getElementById("medallas-rank-bar");
+      const rankLabel = document.getElementById("medallas-rank-label");
+      const rankTable = document.getElementById("medallas-rank-table");
+      const rankTbody = document.getElementById("medallas-rank-tbody");
+      const rankEmpty = document.getElementById("medallas-rank-empty");
+
+      function showError(msg) {
+        errorEl.textContent = msg;
+        errorEl.hidden = false;
+      }
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+      }
+      function shortAddr(addr) {
+        return addr.slice(0, 6) + "…" + addr.slice(-4);
+      }
+
+      // ---- Medallero propio (requiere wallet conectada) ------------------
+      function renderMedalGrid(unlockedMap) {
+        medalGrid.innerHTML = R3AchievementDefs.LIST.map((def) => {
+          const unlockedAt = unlockedMap ? unlockedMap.get(def.id) : null;
+          const isUnlocked = Boolean(unlockedAt);
+          return `
+            <div class="medal-card ${isUnlocked ? "medal-unlocked" : ""}">
+              <div class="medal-card-name">${isUnlocked ? "🎖️" : "🔒"} ${escapeHtml(def.name)}</div>
+              <div class="medal-card-desc">${escapeHtml(def.desc)}</div>
+              <span class="medal-card-scope">${def.scope === "lifetime" ? "Acumulado" : "Una partida"}</span>
+              ${isUnlocked ? `<div class="medal-card-date">Desbloqueado ${new Date(unlockedAt * 1000).toLocaleDateString("es")}</div>` : ""}
+            </div>
+          `;
+        }).join("");
+      }
+      renderMedalGrid(null); // muestra la lista completa bloqueada mientras no haya wallet
+
+      async function loadMyMedals(address) {
+        if (!R3Wallet.isContractConfigured()) return;
+        try {
+          const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, window.R3_ABIS.GAME, R3Events.getProvider());
+          const fromBlock = Number(CFG.GAME_CONTRACT_DEPLOY_BLOCK) || 0;
+          const toBlock = await R3Events.getLatestBlock();
+          const filter = contract.filters.AchievementUnlocked(address);
+          const logs = await contract.queryFilter(filter, fromBlock, toBlock);
+          const unlockedMap = new Map();
+          for (const log of logs) {
+            unlockedMap.set(Number(log.args.achievementId), Number(log.args.timestamp));
+          }
+          mineHint.textContent = `${unlockedMap.size}/${R3AchievementDefs.LIST.length} logros desbloqueados con esta wallet.`;
+          renderMedalGrid(unlockedMap);
+        } catch (err) {
+          console.error(err);
+          showError((err && err.message) || "No se pudieron leer tus logros on-chain.");
+        }
+      }
+
+      btnConnect.addEventListener("click", async () => {
+        errorEl.hidden = true;
+        btnConnect.disabled = true;
+        try {
+          const addr = await R3Wallet.connect();
+          statusEl.textContent = `Conectado: ${R3Wallet.shortAddress(addr)}`;
+          await loadMyMedals(addr);
+        } catch (err) {
+          console.error(err);
+          showError((err && err.message) || "No se pudo conectar la wallet.");
+        } finally {
+          btnConnect.disabled = false;
+        }
+      });
+
+      // ---- Top global por cantidad de logros (de todos los jugadores) ----
+      async function loadGlobalMedalRanking() {
+        if (!R3Wallet.isContractConfigured()) return;
+        rankProgress.hidden = false;
+        try {
+          const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, window.R3_ABIS.GAME, R3Events.getProvider());
+          const fromBlock = Number(CFG.GAME_CONTRACT_DEPLOY_BLOCK) || 0;
+          const toBlock = await R3Events.getLatestBlock();
+
+          const [unlockLogs, aliasLogs] = await Promise.all([
+            R3Events.queryLogsChunked(contract, "AchievementUnlocked", fromBlock, toBlock, (done, total) => {
+              rankLabel.textContent = "Leyendo logros on-chain…";
+              rankBar.style.width = Math.round((done / total) * 50) + "%";
+            }),
+            R3Events.queryLogsChunked(contract, "AliasSet", fromBlock, toBlock, (done, total) => {
+              rankLabel.textContent = "Leyendo alias on-chain…";
+              rankBar.style.width = 50 + Math.round((done / total) * 50) + "%";
+            }),
+          ]);
+
+          const countByAddr = new Map();
+          for (const log of unlockLogs) {
+            const addr = log.args.player.toLowerCase();
+            countByAddr.set(addr, (countByAddr.get(addr) || 0) + 1);
+          }
+          const aliasByAddr = new Map();
+          for (const log of aliasLogs) {
+            aliasByAddr.set(log.args.player.toLowerCase(), log.args.newAlias);
+          }
+
+          rankProgress.hidden = true;
+
+          if (countByAddr.size === 0) {
+            rankEmpty.hidden = false;
+            return;
+          }
+
+          const ranked = [...countByAddr.entries()].sort((a, b) => b[1] - a[1]).slice(0, 200);
+          rankTbody.innerHTML = ranked
+            .map(([addr, count], i) => {
+              const alias = aliasByAddr.get(addr);
+              return `
+                <tr>
+                  <td class="rank-pos">${i + 1}</td>
+                  <td>
+                    <span class="rank-alias">${alias ? escapeHtml(alias) : shortAddr(addr)}</span>
+                    ${alias ? `<span class="rank-addr">${shortAddr(addr)}</span>` : ""}
+                  </td>
+                  <td class="rank-score">${count}</td>
+                </tr>
+              `;
+            })
+            .join("");
+          rankTable.hidden = false;
+        } catch (err) {
+          console.error(err);
+          rankProgress.hidden = true;
+          showError((err && err.message) || "No se pudo leer el top de logros on-chain.");
+        }
+      }
+
+      if (!R3Wallet.isContractConfigured()) {
+        showError(
+          "El contrato del juego todavía no está configurado (GAME_CONTRACT_ADDRESS en js/config.js sigue siendo el placeholder), así que todavía no hay logros on-chain que mostrar."
+        );
+      } else {
+        loadGlobalMedalRanking();
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -26,6 +26,20 @@
   const progressBar = el("progress-bar");
   const progressLabel = el("progress-label");
 
+  const aliasRow = el("alias-row");
+  const aliasCurrent = el("alias-current");
+  const aliasInput = el("alias-input");
+  const btnSaveAlias = el("btn-save-alias");
+
+  const goAchievementsEarned = el("go-achievements-earned");
+  const goAchievementsList = el("go-achievements-list");
+  const goOnchain = el("go-onchain");
+  const goOnchainStatus = el("go-onchain-status");
+  const btnSaveScore = el("btn-save-score");
+  const btnSaveAchievements = el("btn-save-achievements");
+  const goConnectHint = el("go-connect-hint");
+  const btnConnectGameover = el("btn-connect-gameover");
+
   const hudScore = el("hud-score");
   const hudWave = el("hud-wave");
   const hudWaveName = el("hud-wave-name");
@@ -55,6 +69,13 @@
 
   let collection = null;
   let collectionLoading = false;
+
+  // ---- Ranking/logros on-chain: estado compartido entre el menú y la
+  // pantalla de game over -----------------------------------------------
+  let currentAlias = "";
+  let achievementsMaskCache = null; // bitmask leído del contrato (se refresca al conectar y tras guardar)
+  let lastGameOverSummary = null; // el último resumen de partida, para poder mostrar/guardar logros si la wallet se conecta DESPUÉS del game over
+  let lastNewAchievementIds = []; // ids de logros ganados esta partida que TODAVÍA no están on-chain
 
   // Aviso claro si alguien abre index.html directo desde su computadora
   // (doble clic, o desde dentro de un .zip sin extraer) en vez de por un
@@ -116,6 +137,178 @@
       "🧪 Estás en modo prueba: GAME_CONTRACT_ADDRESS todavía es el placeholder en js/config.js, así que \"Probar gratis\" carga la colección REAL de r3tards pero no cobra nada. Despliega tu contrato y pega su dirección ahí para activar el cobro real."
     );
   }
+
+  // ---------------------------------------------------------------
+  // Ranking global y logros on-chain (ver contracts/R3Apocalipsis.sol).
+  // Todo esto es SOLO un extra sobre lo anterior: en modo prueba, o sin
+  // wallet conectada, simplemente no se muestra nada de esto.
+  // ---------------------------------------------------------------
+  async function refreshAliasUI(addr) {
+    if (testMode || !addr) {
+      aliasRow.hidden = true;
+      return;
+    }
+    aliasRow.hidden = false;
+    try {
+      currentAlias = (await R3Wallet.getPlayerAlias(addr)) || "";
+    } catch (err) {
+      console.warn("No se pudo leer el alias on-chain:", err);
+      currentAlias = "";
+    }
+    aliasCurrent.textContent = currentAlias ? `Alias actual: "${currentAlias}"` : "Todavía no tienes alias";
+    aliasInput.value = currentAlias;
+  }
+
+  btnSaveAlias.addEventListener("click", async () => {
+    R3Audio.uiClick();
+    const value = aliasInput.value.trim();
+    if (!value) {
+      showMenuError("Escribe un alias antes de guardarlo.");
+      return;
+    }
+    const addr = R3Wallet.getAddress();
+    if (!addr) {
+      showMenuError("Conecta tu wallet primero.");
+      return;
+    }
+    btnSaveAlias.disabled = true;
+    toast("Confirma la transacción en tu wallet…", 6000);
+    try {
+      await R3Wallet.setPlayerAlias(value);
+      currentAlias = value;
+      aliasCurrent.textContent = `Alias actual: "${value}"`;
+      toast("¡Alias guardado! Ya aparece así en el ranking.", 2600);
+    } catch (err) {
+      console.error(err);
+      const msg = /user rejected|denied/i.test(err.message || "") ? "Cancelaste la transacción." : err.message || "No se pudo guardar el alias.";
+      showMenuError(msg);
+    } finally {
+      btnSaveAlias.disabled = false;
+    }
+  });
+
+  async function ensureAchievementsMask(addr) {
+    if (achievementsMaskCache !== null) return achievementsMaskCache;
+    try {
+      achievementsMaskCache = await R3Wallet.getAchievementsMask(addr);
+    } catch (err) {
+      console.warn("No se pudo leer achievementsMask on-chain:", err);
+      achievementsMaskCache = 0n;
+    }
+    return achievementsMaskCache;
+  }
+
+  /** Calcula qué logros (session + lifetime) ya cumple esta partida/wallet. */
+  function computeEarnedAchievementIds(summary, addr) {
+    const sessionIds = window.R3AchievementDefs ? R3AchievementDefs.bySessionStats(summary) : [];
+    let lifetimeIds = [];
+    if (addr && window.R3Achievements && window.R3AchievementDefs && collection) {
+      const kills = R3Achievements.getKills(addr);
+      lifetimeIds = R3AchievementDefs.byLifetimeKills(kills, collection.length);
+    }
+    return Array.from(new Set([...sessionIds, ...lifetimeIds])).sort((a, b) => a - b);
+  }
+
+  function renderGameOverAchievements(earnedIds) {
+    if (!window.R3AchievementDefs || earnedIds.length === 0) {
+      goAchievementsEarned.hidden = true;
+      goAchievementsList.innerHTML = "";
+      return;
+    }
+    goAchievementsEarned.hidden = false;
+    goAchievementsList.innerHTML = earnedIds
+      .map((id) => {
+        const def = R3AchievementDefs.byId(id);
+        return def ? `<li title="${def.desc}">🎖️ ${def.name}</li>` : "";
+      })
+      .join("");
+  }
+
+  /** Actualiza la sección "guardar en el ranking / guardar logros" del game over. */
+  async function updateGameOverOnchainSection() {
+    const addr = R3Wallet.getAddress && R3Wallet.getAddress();
+    if (testMode) {
+      goOnchain.hidden = true;
+      goConnectHint.hidden = true;
+      return;
+    }
+    if (!addr) {
+      goOnchain.hidden = true;
+      goConnectHint.hidden = false;
+      return;
+    }
+    goConnectHint.hidden = true;
+    goOnchain.hidden = false;
+    goOnchainStatus.textContent = "";
+
+    const earnedIds = lastGameOverSummary ? computeEarnedAchievementIds(lastGameOverSummary, addr) : [];
+    renderGameOverAchievements(earnedIds);
+
+    const mask = await ensureAchievementsMask(addr);
+    lastNewAchievementIds = earnedIds.filter((id) => (mask & (1n << BigInt(id))) === 0n);
+    btnSaveAchievements.textContent = lastNewAchievementIds.length
+      ? `🎖️ Guardar logros nuevos (${lastNewAchievementIds.length})`
+      : "🎖️ Guardar logros nuevos";
+    btnSaveAchievements.disabled = lastNewAchievementIds.length === 0;
+  }
+
+  btnConnectGameover.addEventListener("click", async () => {
+    R3Audio.uiClick();
+    btnConnectGameover.disabled = true;
+    try {
+      const addr = await R3Wallet.connect();
+      walletStatus.textContent = `Conectado: ${R3Wallet.shortAddress(addr)}`;
+      achievementsMaskCache = null;
+      await Promise.all([refreshAliasUI(addr), updateGameOverOnchainSection()]);
+    } catch (err) {
+      console.error(err);
+      goOnchainStatus.textContent = err.message || "No se pudo conectar la wallet.";
+    } finally {
+      btnConnectGameover.disabled = false;
+    }
+  });
+
+  btnSaveScore.addEventListener("click", async () => {
+    R3Audio.uiClick();
+    if (!lastGameOverSummary) return;
+    btnSaveScore.disabled = true;
+    goOnchainStatus.textContent = "Confirma la transacción en tu wallet…";
+    try {
+      await R3Wallet.submitScore(lastGameOverSummary.score);
+      goOnchainStatus.textContent = "¡Puntaje guardado en el ranking global!";
+    } catch (err) {
+      console.error(err);
+      const msg = /user rejected|denied/i.test(err.message || "")
+        ? "Cancelaste la transacción."
+        : /no supera/i.test(err.message || "")
+        ? "Este puntaje no supera tu mejor récord guardado — no hace falta guardarlo de nuevo."
+        : err.message || "No se pudo guardar el puntaje.";
+      goOnchainStatus.textContent = msg;
+    } finally {
+      btnSaveScore.disabled = false;
+    }
+  });
+
+  btnSaveAchievements.addEventListener("click", async () => {
+    R3Audio.uiClick();
+    if (lastNewAchievementIds.length === 0) return;
+    btnSaveAchievements.disabled = true;
+    goOnchainStatus.textContent = "Confirma la transacción en tu wallet…";
+    try {
+      await R3Wallet.unlockAchievementsOnChain(lastNewAchievementIds);
+      const addr = R3Wallet.getAddress();
+      achievementsMaskCache = null; // se relee fresco la próxima vez
+      goOnchainStatus.textContent = `¡${lastNewAchievementIds.length} logro(s) guardado(s)! Ya se ven en tus medallas.`;
+      lastNewAchievementIds = [];
+      btnSaveAchievements.textContent = "🎖️ Guardar logros nuevos";
+      btnSaveAchievements.disabled = true;
+    } catch (err) {
+      console.error(err);
+      const msg = /user rejected|denied/i.test(err.message || "") ? "Cancelaste la transacción." : err.message || "No se pudieron guardar los logros.";
+      goOnchainStatus.textContent = msg;
+      btnSaveAchievements.disabled = false;
+    }
+  });
 
   // ---------------------------------------------------------------
   // Carga de la colección (arranca sola, no bloquea el resto del menú)
@@ -224,6 +417,8 @@
     try {
       const addr = await R3Wallet.connect();
       walletStatus.textContent = `Conectado: ${R3Wallet.shortAddress(addr)}`;
+      achievementsMaskCache = null;
+      await refreshAliasUI(addr);
     } catch (err) {
       console.error(err);
       showMenuError(err.message || "No se pudo conectar la wallet.");
@@ -356,6 +551,8 @@
         li.textContent = `${labels[tier] || tier}: ${count}`;
         goBreakdown.appendChild(li);
       });
+      lastGameOverSummary = summary;
+      updateGameOverOnchainSection();
       showScreen("gameover");
     },
   });

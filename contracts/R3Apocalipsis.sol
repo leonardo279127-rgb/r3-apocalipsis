@@ -40,7 +40,83 @@ contract R3Apocalipsis is Ownable, Pausable, ReentrancyGuard {
     event PriceUpdated(uint256 oldPrice, uint256 newPrice);
     event Withdrawn(address indexed to, uint256 amount);
 
+    // ------------------------------------------------------------------
+    // Ranking global y logros — guardados en la propia cadena a propósito:
+    // el sitio es 100% estático (sin servidor propio), así que esta es la
+    // única forma de que el ranking y los logros sean de VERDAD globales
+    // (que los vea cualquiera) sin depender de un backend que alguien
+    // tenga que mantener. El costo es una transacción chiquita (gas) cada
+    // vez que alguien mejora su propio récord o desbloquea un logro nuevo
+    // — nunca en cada partida.
+    //
+    // ⚠️ MISMA LIMITACIÓN YA CONOCIDA que "jugar sin pagar" (ver README):
+    // como el juego corre solo en el navegador de cada jugador, sin
+    // servidor que verifique nada, alguien técnico PODRÍA llamar
+    // submitScore()/unlockAchievements() directo desde la consola con
+    // números inventados, sin haber jugado de verdad. No hay forma de
+    // cerrar esto al 100% sin un backend propio que valide cada partida
+    // (fuera del alcance de este proyecto, ver README). Como no hay
+    // ningún premio en dinero ligado al puntaje o a los logros, el peor
+    // caso es alguien mintiendo sobre su propio puntaje/logros en un
+    // juego gratis de ver — no hay forma de robar fondos ni de afectar a
+    // otros jugadores con esto.
+    // ------------------------------------------------------------------
+
+    uint256 public constant MAX_ALIAS_LENGTH = 20;
+
+    /// @notice Alias público que cada wallet puede ponerse (para el ranking).
+    mapping(address => string) public playerAlias;
+
+    /// @notice Mejor puntaje histórico de cada wallet (solo puede subir).
+    mapping(address => uint256) public bestScore;
+
+    /// @notice Logros desbloqueados por wallet, como bitmask (bit N = logro N,
+    /// ver web/js/achievements-onchain.js para la lista con nombres/criterios).
+    mapping(address => uint256) public achievementsMask;
+
+    event AliasSet(address indexed player, string newAlias);
+    event ScoreSubmitted(address indexed player, uint256 score, uint256 timestamp);
+    event AchievementUnlocked(address indexed player, uint8 achievementId, uint256 timestamp);
+
     constructor(address initialOwner) Ownable(initialOwner) {}
+
+    /// @notice Pone o cambia tu alias público (se muestra en el ranking en
+    /// vez de tu dirección completa). Se puede cambiar cuantas veces quieras.
+    function setAlias(string calldata newAlias) external {
+        bytes memory b = bytes(newAlias);
+        require(b.length > 0 && b.length <= MAX_ALIAS_LENGTH, "R3: alias debe tener entre 1 y 20 caracteres");
+        playerAlias[msg.sender] = newAlias;
+        emit AliasSet(msg.sender, newAlias);
+    }
+
+    /// @notice Guarda un nuevo mejor puntaje propio, solo si supera el
+    /// anterior (así nadie paga gas de más por un puntaje que no mejora nada).
+    function submitScore(uint256 score) external {
+        require(score > bestScore[msg.sender], "R3: no supera tu propio mejor puntaje");
+        bestScore[msg.sender] = score;
+        emit ScoreSubmitted(msg.sender, score, block.timestamp);
+    }
+
+    /// @notice Marca uno o varios logros como desbloqueados de una sola vez
+    /// (para no pagar gas por transacción por cada uno). Los que ya estaban
+    /// desbloqueados se ignoran en silencio, nunca emiten el evento dos veces.
+    function unlockAchievements(uint8[] calldata ids) external {
+        uint256 mask = achievementsMask[msg.sender];
+        for (uint256 i = 0; i < ids.length; i++) {
+            uint8 id = ids[i];
+            uint256 bit = 1 << id;
+            if (mask & bit == 0) {
+                mask |= bit;
+                emit AchievementUnlocked(msg.sender, id, block.timestamp);
+            }
+        }
+        achievementsMask[msg.sender] = mask;
+    }
+
+    /// @notice ¿Esta wallet ya tiene el logro `id`?
+    function hasAchievement(address player, uint8 id) external view returns (bool) {
+        return (achievementsMask[player] & (1 << id)) != 0;
+    }
 
     /**
      * @notice Paga el precio de la partida y desbloquea el juego en el frontend.
