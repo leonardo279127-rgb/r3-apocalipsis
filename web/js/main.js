@@ -51,6 +51,8 @@
   const hudDifficultyMax = el("hud-difficulty-max");
   const hudDifficultyFill = el("hud-difficulty-fill");
   const hudLives = el("hud-lives");
+  const hudWeaponName = el("hud-weapon-name");
+  const hudWeaponEl = el("hud-weapon");
   const hudCombo = el("hud-combo");
   const hudProgress = el("hud-progress");
   const tagLayer = el("tag-layer");
@@ -134,6 +136,19 @@
   btnPlay.textContent = testMode ? "🧪 Probar gratis (colección real)" : `🎮 Jugar (${priceText})`;
   btnPlayAgain.textContent = testMode ? "🧪 Probar de nuevo" : `🔁 Jugar de nuevo (${priceText})`;
   btnPlay.disabled = false;
+
+  // Aclaración explícita del costo real — pedido explícito: "decir que
+  // no vale nada y que solo cobra las fees del minteo". playPrice() en
+  // el contrato ya decide si de verdad cobra algo o no; este texto solo
+  // lo explica en criollo para que no quede duda de qué es cada cosa.
+  const feeNote = el("fee-note");
+  if (testMode) {
+    feeNote.textContent = "🧪 Modo prueba: no hay wallet ni cobro de ningún tipo todavía.";
+  } else if (priceText === "Gratis") {
+    feeNote.innerHTML = "El juego en sí es <strong>gratis</strong> — no cobramos nada. Lo único que pagas es el gas normal de la red Monad (la comisión de la propia blockchain por procesar tu transacción), no un cobro nuestro.";
+  } else {
+    feeNote.innerHTML = `Pagas <strong>${priceText}</strong> por partida (va directo al contrato, verificable on-chain) más el gas normal de la red Monad — nada oculto, nada de suscripciones.`;
+  }
 
   if (testMode) {
     btnConnect.hidden = true;
@@ -458,9 +473,42 @@
     R3Audio.uiClick();
     btnRetry.hidden = true;
     clearMenuError();
-    ensureCollectionLoaded();
+    ensureCollectionLoaded().then(fillShowcase);
   });
-  ensureCollectionLoaded();
+  ensureCollectionLoaded().then(fillShowcase);
+
+  // ---------------------------------------------------------------
+  // Vitrina de piezas reales en el menú — pedido explícito: "con imagen
+  // de r3tards", "más interactivo". Nada de arte de relleno: son piezas
+  // reales de la colección ya cargada, elegidas al azar. Cada tanto (con
+  // el menú a la vista) se cambia UNA al azar por otra, para que se
+  // sienta vivo sin marear con demasiado movimiento a la vez.
+  const showcaseImgs = Array.from(document.querySelectorAll(".showcase-img"));
+  function setShowcaseSlot(imgEl, item) {
+    if (!item || !item.image) return;
+    imgEl.classList.remove("loaded");
+    const probe = new Image();
+    probe.onload = () => {
+      imgEl.src = item.image;
+      imgEl.classList.add("loaded");
+    };
+    probe.onerror = () => {}; // si esa imagen puntual falla, se queda con la anterior — nunca un ícono roto
+    probe.src = item.image;
+  }
+  function fillShowcase(coll) {
+    if (!coll || !coll.length || showcaseImgs.length === 0) return;
+    const pool = [...coll].sort(() => Math.random() - 0.5);
+    showcaseImgs.forEach((imgEl, i) => setShowcaseSlot(imgEl, pool[i % pool.length]));
+    if (!fillShowcase._rotating) {
+      fillShowcase._rotating = true;
+      setInterval(() => {
+        if (!collection || !screens.menu.classList.contains("active")) return;
+        const slot = showcaseImgs[(Math.random() * showcaseImgs.length) | 0];
+        const item = collection[(Math.random() * collection.length) | 0];
+        setShowcaseSlot(slot, item);
+      }, 4000);
+    }
+  }
 
   // ---------------------------------------------------------------
   // Wallet
@@ -537,6 +585,23 @@
   });
 
   // ---------------------------------------------------------------
+  // Silenciar/activar la música de fondo — se recuerda entre partidas
+  // (ver MUSIC_MUTE_KEY en audio.js), para que "no sea molesto" sea
+  // una decisión del jugador, no solo del volumen que le pusimos.
+  // ---------------------------------------------------------------
+  const btnMuteMusic = el("btn-mute-music");
+  function refreshMuteBtn() {
+    const muted = R3Audio.isMusicMuted();
+    btnMuteMusic.textContent = muted ? "🔇 Música" : "🔊 Música";
+    btnMuteMusic.classList.toggle("muted", muted);
+  }
+  refreshMuteBtn();
+  btnMuteMusic.addEventListener("click", () => {
+    R3Audio.setMusicMuted(!R3Audio.isMusicMuted());
+    refreshMuteBtn();
+  });
+
+  // ---------------------------------------------------------------
   // Motor del juego: callbacks de UI
   // ---------------------------------------------------------------
   R3Game.init(el("game-canvas"), {
@@ -589,11 +654,31 @@
       if (info.big) spawnBanner(info);
     },
     onDamageBuff: (mult) => spawnDamageBanner(mult),
-    onWeaponUnlock: (meta) => spawnWeaponBanner(meta),
+    onWeaponUnlock: (meta) => {
+      // Además del banner (que se ve 2s y desaparece), el HUD deja el
+      // nombre y el ícono del arma puestos todo el tiempo — así el
+      // jugador siempre sabe qué trae equipado sin tener que recordarlo.
+      hudWeaponName.textContent = meta.label;
+      const existingIcon = hudWeaponEl.querySelector(".hud-weapon-icon");
+      if (existingIcon) existingIcon.remove();
+      const icon = document.createElement("img");
+      icon.className = "hud-weapon-icon";
+      icon.src = `assets/weapons/w-${meta.imgKey}.png`;
+      icon.alt = "";
+      hudWeaponEl.prepend(icon);
+      spawnWeaponBanner(meta);
+    },
     onProgress: (killedCount, total) => {
       lastProgressText = `${killedCount}/${total}`;
       hudProgress.textContent = lastProgressText;
-      if (killedCount === 0) killLog.innerHTML = ""; // partida nueva: log limpio
+      if (killedCount === 0) {
+        killLog.innerHTML = ""; // partida nueva: log limpio
+        // Reset del indicador de arma: cada partida arranca sin arma
+        // (a puños) hasta el primer épico/legendario muerto.
+        hudWeaponName.textContent = "puños";
+        const existingIcon = hudWeaponEl.querySelector(".hud-weapon-icon");
+        if (existingIcon) existingIcon.remove();
+      }
     },
     onKill: (info) => {
       // Logros: solo se registran si hay una wallet conectada (en modo

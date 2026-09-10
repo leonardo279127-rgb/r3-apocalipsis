@@ -34,6 +34,16 @@ const R3Game = (() => {
   let certifiedKills = 0; // cuántos "Certified" (1/1) mató en ESTA partida — ver logro "Certificado"
   let legendaryKills = 0; // sube el daño del jugador: 1er legendario → x2, 2do → x3 (tope)
   let legendariesSpawned = 0; // cada legendario que aparece hace que el SIGUIENTE sea más resistente
+  // Tope de cuántos épicos/legendarios pueden estar ATACANDO (tirando
+  // cosas) al mismo tiempo — ver spawnNFT/MAX_ACTIVE_THROWERS. Sin esto,
+  // en partidas largas podían coincidir 4-5 al mismo tiempo bombardeando
+  // al jugador, que solo se puede mover en una sola dimensión (izquierda/
+  // derecha): eso deja de ser "difícil" y pasa a ser imposible de
+  // esquivar de verdad, no importa qué tan bueno seas. Bajarle la vida a
+  // eso hace que la partida sea más difícil de forma justa (más rápido,
+  // más resistente, personajes más raros) en vez de injusta (bala por
+  // todos lados a la vez, sin forma real de reaccionar).
+  let activeThrowers = [];
   let sessionKilledIds = new Set(); // tokenIds distintos matados en ESTA partida — meta: llegar a collection.length (los 1033)
 
   let spawnTimer = 0;
@@ -58,15 +68,26 @@ const R3Game = (() => {
   const AVATAR_KEY_SPEED = 620; // px/s moviéndose con teclado (flechas o A/D)
 
   // ---- Progresión de arma (ver WEAPON_TIER_META/currentWeaponTier) ----
-  let lastFireDir = 1; // -1/1 — hacia dónde apuntó el último disparo, para reflejar el arma
+  let lastFireAngle = -Math.PI / 2; // ángulo (rad) del último disparo — arranca apuntando hacia arriba,
+  // que es lo normal ya que los r3tards caen desde arriba. Reemplaza al viejo
+  // lastFireDir (-1/1) que solo dejaba mirar el arma horizontal: ahora el
+  // arma apunta EXACTAMENTE hacia donde disparaste (pedido explícito: "que
+  // se vea vertical en vez de horizontal como está ahora").
   let lastAnnouncedWeaponTier = 0; // último tier ya avisado con el banner, no repetir el aviso
 
-  // ---- Fondo dinámico: la imagen de un r3tard real de fondo, que va
-  // cambiando de menos raro a más raro a medida que avanza la partida.
-  let bgSortedList = []; // [...collection] ordenada de menos a más rara
-  let bgIndex = 0;
-  let bgChangeTimer = 0;
-  const bgImageCache = new Map(); // tokenId -> HTMLImageElement | 'loading' | 'error'
+  // ---- Fondo: un lugar real distinto por cada nivel de dificultad (1
+  // Colombia, 2 Venezuela, 3 Argentina, 4 Brasil, 5 España, 6 Francia,
+  // 7 Alemania, 8 China, 9 Japón, 10 Gary, Indiana) — pedido explícito:
+  // "los fondos no me gustan, le falta vida, pon un lugar característico
+  // por nivel". Reemplaza al viejo fondo (una imagen translúcida de un
+  // r3tard cualquiera, tintada por rareza/oleada), que quedó descartado
+  // por completo. Cada lugar es una ilustración dibujada por código
+  // (silueta en capas, sin fotos: ver COUNTRY_SCENES más abajo) — se
+  // dibuja UNA vez a un canvas aparte y se reusa mientras no cambie el
+  // nivel ni el tamaño de pantalla (ensureSceneCache), así no se vuelve
+  // a calcular 60 veces por segundo.
+  let sceneCanvas = null;
+  let sceneCacheKey = "";
 
   const THEMES = [
     { name: "Grieta Inicial", top: "#150a2b", bottom: "#3a1f68", particle: "#8f7bff", accent: "#6E54FF" },
@@ -75,6 +96,363 @@ const R3Game = (() => {
     { name: "Vacío Cósmico", top: "#020010", bottom: "#12002b", particle: "#9df1ff", accent: "#5eead4" },
     { name: "Apocalipsis Total", top: "#050005", bottom: "#4a0e6b", particle: "#ff5e9c", accent: "#6E54FF" },
   ];
+
+  // ---- Escenas de fondo por país/lugar (ver getCountryIdx/ensureSceneCache) ----
+  // Todo dibujado por código (gradientes + siluetas en capas), cero fotos:
+  // no hay forma segura de bajar fotos reales de internet (derechos de
+  // autor) ni un generador de imágenes fotorrealistas disponible, así que
+  // se optó por ilustraciones estilizadas tipo "postal" — encajan con el
+  // resto del juego (que ya es 100% formas dibujadas, sin más asset que
+  // el logo de Monad y las armas).
+  function ridgeLayer(c, w, h, baseYFrac, freqs, color) {
+    const baseY = h * baseYFrac;
+    c.beginPath();
+    c.moveTo(0, h);
+    const steps = 48;
+    for (let i = 0; i <= steps; i++) {
+      const x = (w * i) / steps;
+      let y = baseY;
+      for (const f of freqs) y += Math.sin((x / w) * f.k * Math.PI * 2 + f.p) * f.a * h;
+      c.lineTo(x, y);
+    }
+    c.lineTo(w, h);
+    c.closePath();
+    c.fillStyle = color;
+    c.fill();
+  }
+  function skyGrad(c, w, h, top, bottom) {
+    const g = c.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, top);
+    g.addColorStop(1, bottom);
+    c.fillStyle = g;
+    c.fillRect(0, 0, w, h);
+  }
+  function smokePlume(c, x, y, s, color) {
+    c.save();
+    c.globalAlpha = 0.35;
+    c.fillStyle = color;
+    for (let i = 0; i < 4; i++) {
+      c.beginPath();
+      c.ellipse(x + Math.sin(i * 1.7) * s * 0.5, y - i * s * 0.9, s * (0.6 + i * 0.22), s * 0.5, 0, 0, Math.PI * 2);
+      c.fill();
+    }
+    c.restore();
+  }
+
+  const COUNTRY_SCENES = [
+    // 1. Colombia — cordillera cafetera: niebla verde y terrazas de café.
+    {
+      name: "Colombia",
+      accent: "#7cffb2",
+      draw(c, w, h) {
+        skyGrad(c, w, h, "#ffdca8", "#2f6b4f");
+        ridgeLayer(c, w, h, 0.42, [{ k: 1.1, p: 0.4, a: 0.05 }, { k: 2.3, p: 1.2, a: 0.02 }], "#5f8f6d");
+        ridgeLayer(c, w, h, 0.55, [{ k: 1.6, p: 1.1, a: 0.06 }, { k: 3.1, p: 2.0, a: 0.02 }], "#2f5c42");
+        // Terrazas de café: bandas escalonadas con filitas de matas.
+        for (let row = 0; row < 4; row++) {
+          const y = h * (0.72 + row * 0.065);
+          c.fillStyle = row % 2 === 0 ? "#173625" : "#1f4530";
+          c.fillRect(0, y, w, h * 0.07);
+          c.fillStyle = "#0f2318";
+          for (let x = (row % 2) * 14; x < w; x += 26) c.fillRect(x, y - 4, 6, 6);
+        }
+      },
+    },
+    // 2. Venezuela — Salto Ángel: tepuy y cascada.
+    {
+      name: "Venezuela",
+      accent: "#8fd1ff",
+      draw(c, w, h) {
+        skyGrad(c, w, h, "#274a77", "#0e2438");
+        ridgeLayer(c, w, h, 0.5, [{ k: 0.9, p: 0.2, a: 0.04 }], "#20304a");
+        // Tepuy (meseta rocosa vertical) a la derecha del centro.
+        const tx = w * 0.58, tw = w * 0.24, ty = h * 0.22;
+        c.fillStyle = "#16202f";
+        c.fillRect(tx, ty, tw, h * 0.55);
+        c.beginPath();
+        c.moveTo(tx - w * 0.03, ty + h * 0.05);
+        c.lineTo(tx, ty);
+        c.lineTo(tx + tw, ty);
+        c.lineTo(tx + tw + w * 0.03, ty + h * 0.05);
+        c.closePath();
+        c.fill();
+        // Cascada: franjas verticales claras con neblina en la base.
+        const fx = tx + tw * 0.42;
+        const g = c.createLinearGradient(0, ty, 0, h * 0.82);
+        g.addColorStop(0, "rgba(220,245,255,0.9)");
+        g.addColorStop(1, "rgba(220,245,255,0.15)");
+        c.fillStyle = g;
+        c.fillRect(fx, ty + h * 0.05, w * 0.02, h * 0.72);
+        c.beginPath();
+        c.ellipse(fx + w * 0.01, h * 0.82, w * 0.07, h * 0.035, 0, 0, Math.PI * 2);
+        c.fillStyle = "rgba(230,250,255,0.5)";
+        c.fill();
+        ridgeLayer(c, w, h, 0.86, [{ k: 1.4, p: 0.6, a: 0.03 }], "#0c2a1c");
+      },
+    },
+    // 3. Argentina — Andes/Patagonia: picos afilados nevados.
+    {
+      name: "Argentina",
+      accent: "#ff9d5c",
+      draw(c, w, h) {
+        skyGrad(c, w, h, "#ffb37a", "#3b2350");
+        ridgeLayer(c, w, h, 0.5, [{ k: 2.2, p: 0.3, a: 0.09 }, { k: 5, p: 1.8, a: 0.03 }], "#4a3559");
+        ridgeLayer(c, w, h, 0.62, [{ k: 3.1, p: 1.6, a: 0.11 }, { k: 6, p: 0.4, a: 0.03 }], "#241730");
+        // Nieve: triángulos blancos en las puntas más altas.
+        c.fillStyle = "rgba(255,255,255,0.85)";
+        for (const px of [0.18, 0.34, 0.5, 0.66, 0.82]) {
+          const x = w * px, y = h * (0.36 + Math.sin(px * 12) * 0.05);
+          c.beginPath();
+          c.moveTo(x, y);
+          c.lineTo(x - w * 0.02, y + h * 0.05);
+          c.lineTo(x + w * 0.02, y + h * 0.05);
+          c.closePath();
+          c.fill();
+        }
+      },
+    },
+    // 4. Brasil — Corcovado (Cristo Redentor) y Pan de Azúcar sobre la bahía.
+    {
+      name: "Brasil",
+      accent: "#ffd27a",
+      draw(c, w, h) {
+        skyGrad(c, w, h, "#57c2ff", "#ffd27a");
+        ridgeLayer(c, w, h, 0.68, [{ k: 1.2, p: 0.5, a: 0.04 }], "#0e3a2e");
+        // Pan de Azúcar: domo redondeado a la izquierda.
+        c.fillStyle = "#123";
+        c.beginPath();
+        c.ellipse(w * 0.18, h * 0.6, w * 0.09, h * 0.16, 0, Math.PI, 0, false);
+        c.fill();
+        // Corcovado: cerro con el Cristo Redentor (silueta mínima).
+        const hx = w * 0.6, hy = h * 0.42;
+        c.fillStyle = "#0e3a2e";
+        c.beginPath();
+        c.moveTo(hx - w * 0.16, h * 0.7);
+        c.lineTo(hx, hy);
+        c.lineTo(hx + w * 0.16, h * 0.7);
+        c.closePath();
+        c.fill();
+        c.strokeStyle = "#0a1f18";
+        c.lineWidth = Math.max(2, w * 0.006);
+        c.beginPath();
+        c.moveTo(hx, hy - h * 0.001);
+        c.lineTo(hx, hy - h * 0.09);
+        c.moveTo(hx - w * 0.035, hy - h * 0.065);
+        c.lineTo(hx + w * 0.035, hy - h * 0.065);
+        c.stroke();
+        c.beginPath();
+        c.arc(hx, hy - h * 0.105, w * 0.009, 0, Math.PI * 2);
+        c.fillStyle = "#0a1f18";
+        c.fill();
+      },
+    },
+    // 5. España — espiras estilo Sagrada Familia contra un cielo cálido.
+    {
+      name: "España",
+      accent: "#ffb37a",
+      draw(c, w, h) {
+        skyGrad(c, w, h, "#ffe1a8", "#b5502f");
+        ridgeLayer(c, w, h, 0.82, [{ k: 1.1, p: 0.2, a: 0.02 }], "#3a1a12");
+        const spires = [0.32, 0.42, 0.5, 0.58, 0.68];
+        spires.forEach((px, i) => {
+          const x = w * px, hgt = h * (0.22 + (i % 2) * 0.08);
+          const baseY = h * 0.68, topY = baseY - hgt, sw = w * 0.03;
+          c.fillStyle = "#2a1710";
+          c.beginPath();
+          c.moveTo(x - sw, baseY);
+          c.lineTo(x - sw * 0.3, topY);
+          c.lineTo(x, topY - h * 0.03);
+          c.lineTo(x + sw * 0.3, topY);
+          c.lineTo(x + sw, baseY);
+          c.closePath();
+          c.fill();
+        });
+        c.fillStyle = "#2a1710";
+        c.fillRect(0, h * 0.66, w, h * 0.04);
+      },
+    },
+    // 6. Francia — Torre Eiffel y techos parisinos al atardecer.
+    {
+      name: "Francia",
+      accent: "#c77dff",
+      draw(c, w, h) {
+        skyGrad(c, w, h, "#2b1f4d", "#ff9ecb");
+        ridgeLayer(c, w, h, 0.78, [{ k: 0.8, p: 0.3, a: 0.015 }], "#1a1230");
+        // Techos (mansardas) — fila de rectángulos con techo triangular.
+        for (let x = 0; x < w; x += w * 0.09) {
+          const bh = h * (0.06 + (Math.sin(x) * 0.5 + 0.5) * 0.03);
+          c.fillStyle = "#1a1230";
+          c.fillRect(x, h * 0.78 - bh, w * 0.085, bh);
+          c.beginPath();
+          c.moveTo(x, h * 0.78 - bh);
+          c.lineTo(x + w * 0.0425, h * 0.78 - bh - h * 0.02);
+          c.lineTo(x + w * 0.085, h * 0.78 - bh);
+          c.closePath();
+          c.fill();
+        }
+        // Torre Eiffel: patas convergentes + travesaños simples.
+        const ex = w * 0.5, ebase = h * 0.78, etop = h * 0.18, ew = w * 0.1;
+        c.strokeStyle = "#160f28";
+        c.lineWidth = Math.max(2, w * 0.006);
+        c.beginPath();
+        c.moveTo(ex - ew, ebase);
+        c.lineTo(ex, etop);
+        c.lineTo(ex + ew, ebase);
+        c.moveTo(ex - ew * 0.55, (ebase + etop) / 2 + h * 0.05);
+        c.lineTo(ex + ew * 0.55, (ebase + etop) / 2 + h * 0.05);
+        c.moveTo(ex - ew * 0.22, etop + h * 0.09);
+        c.lineTo(ex + ew * 0.22, etop + h * 0.09);
+        c.stroke();
+      },
+    },
+    // 7. Alemania — castillo bávaro entre pinos, niebla de amanecer.
+    {
+      name: "Alemania",
+      accent: "#8fb8ff",
+      draw(c, w, h) {
+        skyGrad(c, w, h, "#a9c6e0", "#3a4a63");
+        ridgeLayer(c, w, h, 0.6, [{ k: 1.4, p: 0.6, a: 0.05 }], "#2e3d52");
+        // Pinos.
+        c.fillStyle = "#1c2a3a";
+        for (let x = w * 0.05; x < w; x += w * 0.07) {
+          const th = h * (0.1 + ((x * 13) % 5) * 0.01);
+          const by = h * 0.72;
+          c.beginPath();
+          c.moveTo(x, by - th);
+          c.lineTo(x - w * 0.018, by);
+          c.lineTo(x + w * 0.018, by);
+          c.closePath();
+          c.fill();
+        }
+        // Castillo: torres con techo cónico.
+        const cx = w * 0.5, base = h * 0.66;
+        c.fillStyle = "#232f42";
+        c.fillRect(cx - w * 0.09, base - h * 0.16, w * 0.18, h * 0.16);
+        [-1, 1].forEach((s) => {
+          const tx = cx + s * w * 0.1;
+          c.fillRect(tx - w * 0.022, base - h * 0.24, w * 0.044, h * 0.24);
+          c.beginPath();
+          c.moveTo(tx - w * 0.03, base - h * 0.24);
+          c.lineTo(tx, base - h * 0.32);
+          c.lineTo(tx + w * 0.03, base - h * 0.24);
+          c.closePath();
+          c.fillStyle = "#c0405a";
+          c.fill();
+          c.fillStyle = "#232f42";
+        });
+      },
+    },
+    // 8. China — la Gran Muralla sobre las colinas, pagoda al fondo.
+    {
+      name: "China",
+      accent: "#ffb84d",
+      draw(c, w, h) {
+        skyGrad(c, w, h, "#ffe9c2", "#c98a4b");
+        ridgeLayer(c, w, h, 0.55, [{ k: 1.5, p: 0.4, a: 0.06 }], "#8a6a4a");
+        ridgeLayer(c, w, h, 0.68, [{ k: 2.0, p: 1.3, a: 0.05 }], "#5f4530");
+        // Pagoda a lo lejos: pisos apilados decrecientes.
+        const px = w * 0.2, pbase = h * 0.6;
+        for (let i = 0; i < 3; i++) {
+          const pw = w * (0.1 - i * 0.024), py = pbase - i * h * 0.06;
+          c.fillStyle = "#3a2a1c";
+          c.fillRect(px - pw / 2, py - h * 0.045, pw, h * 0.045);
+        }
+        // Muralla: línea zigzagueante con almenas, siguiendo la cresta.
+        c.strokeStyle = "#3a2a1c";
+        c.lineWidth = Math.max(3, w * 0.01);
+        c.beginPath();
+        for (let i = 0; i <= 40; i++) {
+          const x = (w * i) / 40;
+          const y = h * 0.68 + Math.sin((x / w) * 2 * Math.PI + 1.3) * h * 0.05;
+          if (i === 0) c.moveTo(x, y);
+          else c.lineTo(x, y);
+        }
+        c.stroke();
+      },
+    },
+    // 9. Japón — Monte Fuji nevado y un torii en primer plano.
+    {
+      name: "Japón",
+      accent: "#ff9ecf",
+      draw(c, w, h) {
+        skyGrad(c, w, h, "#ffd9ec", "#6f8fae");
+        // Fuji: triángulo simétrico con nieve en la cima.
+        const fx = w * 0.55, fbase = h * 0.62, ftop = h * 0.22, fw = w * 0.28;
+        c.fillStyle = "#4a5b73";
+        c.beginPath();
+        c.moveTo(fx - fw, fbase);
+        c.lineTo(fx, ftop);
+        c.lineTo(fx + fw, fbase);
+        c.closePath();
+        c.fill();
+        c.fillStyle = "rgba(255,255,255,0.92)";
+        c.beginPath();
+        c.moveTo(fx, ftop);
+        c.lineTo(fx - fw * 0.32, ftop + h * 0.09);
+        c.lineTo(fx - fw * 0.12, ftop + h * 0.06);
+        c.lineTo(fx, ftop + h * 0.1);
+        c.lineTo(fx + fw * 0.14, ftop + h * 0.055);
+        c.lineTo(fx + fw * 0.32, ftop + h * 0.09);
+        c.closePath();
+        c.fill();
+        ridgeLayer(c, w, h, 0.72, [{ k: 1.1, p: 0.5, a: 0.02 }], "#2b3a4d");
+        // Torii en primer plano, silueta roja/naranja.
+        const tx = w * 0.22, tb = h * 0.86, tt = h * 0.6, tw2 = w * 0.16;
+        c.fillStyle = "#c94a2c";
+        c.fillRect(tx - tw2 / 2, tt, w * 0.02, tb - tt);
+        c.fillRect(tx + tw2 / 2 - w * 0.02, tt, w * 0.02, tb - tt);
+        c.fillRect(tx - tw2 / 2 - w * 0.02, tt, tw2 + w * 0.04, h * 0.022);
+        c.fillRect(tx - tw2 / 2 + w * 0.015, tt + h * 0.03, tw2 - w * 0.03, h * 0.016);
+      },
+    },
+    // 10. Gary, Indiana — skyline industrial oxidado, el nivel más difícil.
+    {
+      name: "Gary, Indiana",
+      accent: "#ff7a45",
+      draw(c, w, h) {
+        skyGrad(c, w, h, "#7a5230", "#241a12");
+        ridgeLayer(c, w, h, 0.86, [{ k: 1.0, p: 0.2, a: 0.015 }], "#1a120c");
+        // Bloques de fábrica de distinto alto.
+        c.fillStyle = "#150f0a";
+        let x = 0;
+        while (x < w) {
+          const bw = w * (0.05 + ((x * 7) % 5) * 0.01);
+          const bh = h * (0.12 + ((x * 13) % 7) * 0.02);
+          c.fillRect(x, h * 0.82 - bh, bw, bh);
+          x += bw + w * 0.01;
+        }
+        // Chimeneas con humo.
+        [0.22, 0.5, 0.74].forEach((px, i) => {
+          const cx = w * px, cbase = h * 0.82, ctop = cbase - h * (0.22 + i * 0.04);
+          c.fillStyle = "#0f0a07";
+          c.fillRect(cx - w * 0.012, ctop, w * 0.024, cbase - ctop);
+          smokePlume(c, cx, ctop, w * 0.03, "#8a7a6a");
+        });
+      },
+    },
+  ];
+
+  /** Nivel de dificultad real (1-10, ver SPAWN_PROGRESSION) → índice 0-9
+   * en COUNTRY_SCENES. El nivel 0 (antes del primer minuto) usa el mismo
+   * lugar que el nivel 1, para no arrancar la partida sin escenario. */
+  function getCountryIdx() {
+    return Math.max(0, Math.min(COUNTRY_SCENES.length - 1, lastDifficultyStep - 1));
+  }
+
+  /** Dibuja la escena del país actual UNA sola vez a un canvas aparte
+   * (offscreen) y la reusa mientras no cambie ni el nivel ni el tamaño de
+   * pantalla — evita rehacer gradientes/siluetas 60 veces por segundo. */
+  function ensureSceneCache(idx) {
+    const w = Math.max(1, Math.round(cssW()));
+    const h = Math.max(1, Math.round(cssH()));
+    const key = idx + "x" + w + "x" + h;
+    if (sceneCacheKey === key) return;
+    sceneCacheKey = key;
+    if (!sceneCanvas) sceneCanvas = document.createElement("canvas");
+    sceneCanvas.width = w;
+    sceneCanvas.height = h;
+    COUNTRY_SCENES[idx].draw(sceneCanvas.getContext("2d"), w, h);
+  }
 
   let monadOrbImg = null;
   const weaponImgs = {}; // imgKey -> HTMLImageElement (ver WEAPON_TIER_META)
@@ -354,9 +732,9 @@ const R3Game = (() => {
    * mayoría de caídas son "primera vez", y si la respuesta de red no llega
    * antes de que el r3tard toque el piso (o lo mates), su imagen nunca
    * llegó a mostrarse a tiempo: se ve como un círculo vacío que "no
-   * aparece", aunque el archivo exista y esté bien en el repo. Lo mismo le
-   * pasa al fondo (ensureBgImage) si tiene que competir por red contra
-   * todas las caídas a la vez.
+   * aparece", aunque el archivo exista y esté bien en el repo. (El fondo
+   * ya no depende de esto — ver COUNTRY_SCENES — pero los r3tards que
+   * caen sí siguen usando su imagen real.)
    *
    * OJO — esto no tiene nada que ver con dónde "viven" las imágenes. Las
    * 1033 imágenes YA están en el repositorio (`web/data/images/*.webp`,
@@ -551,26 +929,6 @@ const R3Game = (() => {
     return best;
   }
 
-  /**
-   * Pide que se cargue la imagen del r3tard en `bgSortedList[idx]` (si no
-   * se ha pedido ya) para usarla como fondo de pantalla. También adelanta
-   * la SIGUIENTE, para que el cambio de fondo sea instantáneo cuando
-   * toque (en vez de verse un salto en blanco mientras carga).
-   */
-  function ensureBgImage(idx) {
-    const item = bgSortedList[idx];
-    if (!item || !item.image) return;
-    if (bgImageCache.has(item.tokenId)) return;
-    bgImageCache.set(item.tokenId, "loading");
-    loadImageWithFallback(item.image, (img) => {
-      bgImageCache.set(item.tokenId, img || "error");
-    });
-  }
-
-  function loadBgImageAt(idx) {
-    ensureBgImage(idx);
-    ensureBgImage(idx + 1);
-  }
 
   /**
    * Los puntos base ya dependen del tier (que a su vez sale de la rareza
@@ -708,13 +1066,6 @@ const R3Game = (() => {
     const hue = hueFromTraitValue(findAttr(item, "aura"));
     return hue === null ? null : hslToHex(hue, 78, 62);
   }
-  /** Paleta de fondo (top/bottom/accent) a partir del rasgo "Background" real, o null si no tiene. */
-  function bgPaletteFromItem(item) {
-    const hue = hueFromTraitValue(findAttr(item, "background"));
-    if (hue === null) return null;
-    return { top: hslToHex(hue, 55, 11), bottom: hslToHex(hue, 55, 30), accent: hslToHex(hue, 70, 58) };
-  }
-
   function spawnNFT() {
     if (collection.length === 0) return;
     const tierKey = pickWeightedTierKey();
@@ -742,9 +1093,26 @@ const R3Game = (() => {
     // ~55% más resistente, el 3° el doble, etc. — tope en +6 legendarios
     // para que nunca llegue a ser literalmente imposible de matar.
     let legendaryEscalation = 1;
+    // Cada legendario tiene una "personalidad" fija (aura + tirada +
+    // sonido + movimiento + frases), elegida por hash de su tokenId —
+    // ver LEGENDARY_AURA_THEMES/auraThemeFor. legendaryTheme.hardness
+    // (0-7) hace que unos sean de entrada más duros que otros, aparte de
+    // la escalada normal por cuántos legendarios van saliendo.
+    const legendaryTheme = tier.key === "legendary" ? auraThemeFor(item.tokenId) : null;
     if (tier.key === "legendary") {
       legendariesSpawned += 1;
       legendaryEscalation = 1 + Math.min(legendariesSpawned - 1, 6) * 0.55;
+      // OJO — este multiplicador de hardness se dejó DELIBERADAMENTE
+      // chico (máx. +28%, no +84%): ya se combina con legendaryEscalation
+      // de arriba (que sola llega hasta 4.3x) y con el tiempo de partida
+      // (hpGrowth). Con un hardness fuerte AQUÍ ADEMÁS, el legendario más
+      // duro (rayos: hardness 7 + teletransporte + el que más tira) se
+      // volvía casi imposible de bajar a tiempo — justo lo que el
+      // usuario pidió evitar ("que todos se puedan matar si se
+      // esfuerzan"). La dificultad de "rayos" ya se nota de sobra en que
+      // cuesta más acertarle (se teletransporta) y ataca más seguido —
+      // no hacía falta apilarle también el triple de vida.
+      if (legendaryTheme) legendaryEscalation *= 1 + legendaryTheme.hardness * 0.04;
     }
     const hp = Math.max(1, Math.round(tier.hp * (1 + progress01() * growth) * legendaryEscalation));
     const baseSpeed = 38 + progress01() * 90; // fácil al inicio, hasta ~3x a los `durationMinutes` (sube en saltos, uno por minuto), luego se mantiene
@@ -752,8 +1120,40 @@ const R3Game = (() => {
     const pointsValue = Math.round(tier.points * rarityBonusMultiplier(item));
     const movement = pickMovementPattern(tier.key);
 
+    // La personalidad de cada legendario también manda sobre cómo se
+    // mueve — pisa lo que haya tirado pickMovementPattern al azar, para
+    // que SIEMPRE sea el mismo tipo de movimiento para ese personaje
+    // (pedido explícito: comportamiento único por legendario), no una
+    // tirada de dados distinta cada vez que aparece.
+    if (legendaryTheme) {
+      if (legendaryTheme.quirk === "teleport") {
+        movement.kind = "teleport";
+      } else if (legendaryTheme.quirk === "weaver") {
+        movement.kind = "fall";
+        movement.zigzag = true;
+        movement.zigAmp = 40 + Math.random() * 20;
+        movement.zigFreq = 1.6 + Math.random() * 0.6;
+      } else if (legendaryTheme.quirk === "tank") {
+        movement.kind = "fall";
+        movement.zigzag = false;
+        movement.tremble = false;
+      } else if (legendaryTheme.quirk === "charger") {
+        movement.kind = "fall";
+        movement.charger = true; // ver update(): acelera mientras sigue vivo
+      }
+    }
+
     let startX, startY, vx;
-    if (movement.kind === "side") {
+    if (movement.kind === "teleport") {
+      // "Quedarse parado" en algún punto del tercio superior, sin caer —
+      // ver update() para el salto periódico a otra esquina. Nunca cruza
+      // el piso, así que nunca hace perder una vida por escaparse: hay
+      // que cazarlo.
+      startX = size / 2 + Math.random() * (cssW() - size);
+      startY = cssH() * (0.14 + Math.random() * 0.4);
+      vx = 0;
+      movement.teleportTimer = 1400 + Math.random() * 900;
+    } else if (movement.kind === "side") {
       // Entra por un costado al azar, cruza y se devuelve por donde vino
       // (ver update()) — no cae de arriba como los demás.
       const fromLeft = Math.random() < 0.5;
@@ -805,9 +1205,16 @@ const R3Game = (() => {
       x: startX,
       baseX: startX, // ancla del zigzag — nunca se pierde aunque n.x oscile
       y: startY,
-      vy: movement.kind === "side" ? 14 + Math.random() * 10 : speed,
+      vy:
+        movement.kind === "side" || movement.kind === "teleport"
+          ? 0
+          : speed * (legendaryTheme && legendaryTheme.quirk === "tank" ? 0.68 : 1), // "tank": pesado, cae más lento (ya de por sí aguanta más golpes)
       vx,
       movement,
+      // Personalidad de este legendario (null si no es legendario) — ver
+      // LEGENDARY_AURA_THEMES/auraThemeFor: qué tira, cómo suena, qué
+      // grita, qué tan duro es.
+      legendaryTheme,
       wobblePhase: Math.random() * Math.PI * 2,
       wobbleAmp: 12 + Math.random() * 18,
       spawnT: performance.now(),
@@ -818,15 +1225,35 @@ const R3Game = (() => {
       // lanzamiento tarda un poco (para no ser injusto apenas aparece);
       // después repite mientras siga vivo y cayendo. Keone/James
       // (isMonadSpammer) atacan siempre, sin importar el tier, y con un
-      // primer lanzamiento mucho más corto (spam desde que aparecen).
+      // primer lanzamiento mucho más corto (spam desde que aparecen). Los
+      // legendarios más "duros" (hardness alto) además tiran más seguido.
       throwTimer:
         tier.key === "epic" || tier.key === "legendary" || isMonadSpammer
           ? isMonadSpammer
             ? 250 + Math.random() * 250
-            : 700 + Math.random() * 700
+            : (700 + Math.random() * 700) * (legendaryTheme ? 1 - legendaryTheme.hardness * 0.06 : 1)
           : null,
+      // Frases propias del personaje, mostradas como cuadros de texto
+      // flotantes mientras sigue vivo (ver update()/floatText) — solo
+      // los legendarios "hablan".
+      tauntTimer: legendaryTheme ? 2200 + Math.random() * 1800 : null,
     };
     falling.push(nft);
+
+    // Tope de atacantes simultáneos (ver MAX_ACTIVE_THROWERS/
+    // activeThrowers arriba): si ya hay demasiados tirando cosas a la
+    // vez, el más viejo de la cola se "calla" (deja de atacar, pero
+    // sigue cayendo y sigue valiendo puntos/contando para la colección)
+    // para dejarle sitio al nuevo. Keone/James no entran en esta cola:
+    // su gracia es precisamente spamear sin parar.
+    if (nft.throwTimer !== null && !nft.isMonadSpammer) {
+      activeThrowers.push(nft);
+      const MAX_ACTIVE_THROWERS = 3;
+      if (activeThrowers.length > MAX_ACTIVE_THROWERS) {
+        const silenced = activeThrowers.shift();
+        silenced.throwTimer = null;
+      }
+    }
 
     // Owner en vivo (no bloquea el spawn).
     R3Loader.getCurrentOwner(item.tokenId).then((owner) => {
@@ -845,7 +1272,7 @@ const R3Game = (() => {
 
     if (tier.key === "epic" || tier.key === "legendary") {
       if (tier.key === "legendary") {
-        R3Audio.legendarySpawnAlert();
+        R3Audio.legendarySpawnAlert(legendaryTheme ? legendaryTheme.pitch : 1);
         shakeTime = 0.55;
         shakeMag = 16;
         spawnFlash = { time: 0.9, maxTime: 0.9, color: tier.color };
@@ -876,7 +1303,8 @@ const R3Game = (() => {
     const dx = targetX - originX;
     const dy = targetY - originY;
     const speed = 780;
-    if (dx !== 0) lastFireDir = dx < 0 ? -1 : 1; // hacia dónde queda mirando el arma dibujada (ver drawWeapon)
+    const baseAngle = Math.atan2(dy, dx);
+    if (dx !== 0 || dy !== 0) lastFireAngle = baseAngle; // hacia dónde queda apuntando el arma dibujada (ver drawWeapon)
 
     // Ráfaga según el arma desbloqueada (ver WEAPON_TIER_META/
     // currentWeaponTier): en vez de un solo disparo, varios en abanico
@@ -884,7 +1312,6 @@ const R3Game = (() => {
     // más de un disparo por clic, sin tener que volver a apuntar.
     const tier = currentWeaponTier();
     const burst = WEAPON_TIER_META[tier] ? WEAPON_TIER_META[tier].burst : 1;
-    const baseAngle = Math.atan2(dy, dx);
     const spreadStep = 0.05;
     const startAngle = baseAngle - (spreadStep * (burst - 1)) / 2;
     for (let i = 0; i < burst; i++) {
@@ -919,13 +1346,18 @@ const R3Game = (() => {
    * cayendo — mismo patrón que fireProjectile pero al revés (el enemigo
    * apunta al jugador, no el jugador al enemigo). Keone/James (ver
    * isMonadSpammer en spawnNFT) siempre lanzan el logo de Monad en vez
-   * de un objeto al azar.
+   * de un objeto al azar. Un legendario normal tira SIEMPRE de su propio
+   * repertorio (n.legendaryTheme.throwKinds — pato/tv/calzoncillo/rayo/
+   * laser/disco/etc., ver LEGENDARY_AURA_THEMES), no de la lista genérica
+   * de fruta/basura — así se nota de un vistazo qué personaje es, antes
+   * incluso de leer su nombre.
    */
   function throwAtAvatar(n) {
     const targetX = avatarX, targetY = cssH() - AVATAR_Y_OFFSET;
     const dx = targetX - n.x, dy = targetY - n.y;
     const dist = Math.max(1, Math.hypot(dx, dy));
     const speed = 210 + Math.random() * 70;
+    const pool = n.legendaryTheme ? n.legendaryTheme.throwKinds : THROW_OBJECT_KINDS;
     enemyThrows.push({
       x: n.x,
       y: n.y,
@@ -933,8 +1365,8 @@ const R3Game = (() => {
       vy: (dy / dist) * speed,
       rot: Math.random() * Math.PI * 2,
       spin: (Math.random() < 0.5 ? -1 : 1) * (3 + Math.random() * 3),
-      kind: n.isMonadSpammer ? "monad" : THROW_OBJECT_KINDS[(Math.random() * THROW_OBJECT_KINDS.length) | 0],
-      color: n.tier.color,
+      kind: n.isMonadSpammer ? "monad" : pool[(Math.random() * pool.length) | 0],
+      color: n.legendaryTheme ? n.legendaryTheme.glowColor : n.tier.color,
       life: 3,
     });
     R3Audio.shoot(); // mismo "swoosh" que el disparo del jugador, con menos protagonismo visual
@@ -987,6 +1419,10 @@ const R3Game = (() => {
     if (newDifficultyStep !== lastDifficultyStep) {
       lastDifficultyStep = newDifficultyStep;
       onDifficultyChange(newDifficultyStep, CFG.SPAWN_PROGRESSION.durationMinutes);
+      // La música de fondo sube de intensidad (tempo + brillo) junto con
+      // la dificultad real de la partida — pedido explícito: "más
+      // interactivo". Ver setMusicIntensity/scheduleMusicStep en audio.js.
+      R3Audio.setMusicIntensity(newDifficultyStep / CFG.SPAWN_PROGRESSION.durationMinutes);
     }
 
     spawnTimer -= dt * 1000;
@@ -1009,9 +1445,42 @@ const R3Game = (() => {
         if (n.throwTimer <= 0) {
           throwAtAvatar(n);
           // Keone/James "spamean": repiten mucho más seguido que el
-          // resto de épicos/legendarios.
-          n.throwTimer = n.isMonadSpammer ? 380 + Math.random() * 260 : 1400 + Math.random() * 1000;
+          // resto de épicos/legendarios. Un legendario "duro" (hardness
+          // alto en su personalidad) también tira más seguido que uno
+          // suave — ver LEGENDARY_AURA_THEMES.
+          const hardnessMul = n.legendaryTheme ? 1 - n.legendaryTheme.hardness * 0.06 : 1;
+          n.throwTimer = n.isMonadSpammer ? 380 + Math.random() * 260 : (1400 + Math.random() * 1000) * hardnessMul;
         }
+      }
+
+      // Frases propias del personaje (solo legendarios) — cuadros de
+      // texto flotantes cortos mientras sigue vivo, para que cada uno se
+      // sienta como alguien distinto y no solo un color de aura distinto.
+      if (n.tauntTimer !== null) {
+        n.tauntTimer -= dt * 1000;
+        if (n.tauntTimer <= 0) {
+          const phrases = n.legendaryTheme.taunts;
+          const phrase = phrases[(Math.random() * phrases.length) | 0];
+          floatText(n.x, n.y - n.size / 2 - 8, phrase, n.legendaryTheme.glowColor);
+          n.tauntTimer = 3200 + Math.random() * 2600;
+        }
+      }
+
+      // "Teleporter" (ver quirk en LEGENDARY_AURA_THEMES): se queda
+      // flotando en un punto del tercio superior sin caer, y cada tanto
+      // desaparece y reaparece en otro punto al azar — sigue tirando
+      // objetos todo el tiempo (ver arriba). Nunca cruza el piso, así
+      // que hay que cazarlo: no se puede "dejar pasar".
+      if (mv && mv.kind === "teleport") {
+        mv.teleportTimer -= dt * 1000;
+        if (mv.teleportTimer <= 0) {
+          n.x = n.size / 2 + Math.random() * (cssW() - n.size);
+          n.y = cssH() * (0.12 + Math.random() * 0.45);
+          n.baseX = n.x;
+          n.flash = 1; // mismo parpadeo blanco que al recibir un golpe, aprovechado como "destello de teletransporte"
+          mv.teleportTimer = 1700 + Math.random() * 1300;
+        }
+        continue;
       }
 
       if (mv && mv.kind === "side") {
@@ -1036,6 +1505,13 @@ const R3Game = (() => {
       if (mv && mv.zigzag) {
         const osc = Math.sin(performance.now() / 1000 * mv.zigFreq + mv.zigPhase) * mv.zigAmp;
         n.x = Math.max(n.size / 2, Math.min(cssW() - n.size / 2, n.baseX + osc));
+      }
+
+      // "Charger" (ver quirk en LEGENDARY_AURA_THEMES): se va acelerando
+      // mientras sigue vivo, cada vez más urgente — con tope, para que
+      // nunca se vuelva literalmente imposible de reaccionar a tiempo.
+      if (mv && mv.charger) {
+        n.vy = Math.min(n.vy + dt * 30, (38 + progress01() * 90) * 2.4);
       }
 
       n.y += n.vy * dt;
@@ -1148,25 +1624,12 @@ const R3Game = (() => {
     // clic por última vez (o hacia donde lo llevó el teclado), en vez de
     // saltar de golpe.
     avatarX += (avatarTargetX - avatarX) * Math.min(1, dt * 8);
-
-    // Fondo dinámico: cada 10-20s (al azar) avanza UN paso hacia r3tards
-    // más raros — nunca retrocede ni salta varios de una vez.
-    if (bgSortedList.length > 0) {
-      bgChangeTimer -= dt * 1000;
-      if (bgChangeTimer <= 0) {
-        if (bgIndex < bgSortedList.length - 1) {
-          bgIndex += 1;
-          loadBgImageAt(bgIndex);
-        }
-        bgChangeTimer = 10000 + Math.random() * 10000;
-      }
-    }
   }
 
   function hitNFT(n, idx) {
     n.hp -= damageMultiplier();
     n.flash = 1;
-    R3Audio.hitImpact(n.tierKey);
+    R3Audio.hitImpact(n.tierKey, n.legendaryTheme ? n.legendaryTheme.pitch : 1);
     burst(n.x, n.y, n.tier.color, 6, 0.6);
 
     if (n.hp <= 0) {
@@ -1190,7 +1653,7 @@ const R3Game = (() => {
       score += pts;
       onScoreChange(score, pts, combo);
 
-      R3Audio.death(n.tierKey);
+      R3Audio.death(n.tierKey, n.legendaryTheme ? n.legendaryTheme.pitch : 1);
       burst(n.x, n.y, n.tier.color, n.tierKey === "legendary" ? 60 : n.tierKey === "epic" ? 40 : 18, n.tier.sizeMul);
       floatText(n.x, n.y, `+${pts}${combo > 1 ? ` x${combo}` : ""}`, n.tier.color);
 
@@ -1270,51 +1733,26 @@ const R3Game = (() => {
   // Draw
   // ---------------------------------------------------------------
   function drawBackground() {
-    // Fondo dinámico: la imagen real de un r3tard (el mismo mecanismo de
-    // carga que usan los que caen), recortada para llenar toda la
-    // pantalla sin importar su proporción. Va cambiando de menos raro a
-    // más raro a medida que avanza la partida (ver update()).
-    const bgItem = bgSortedList[bgIndex];
-    // Pedido explícito: el tinte de color de fondo sale del propio rasgo
-    // "Background" de ESE r3tard (si la colección lo trae), no de un
-    // tema fijo por oleada — si no tiene ese rasgo, se cae de respaldo
-    // al tema de siempre para que nunca se vea sin color.
-    const theme = (bgItem && bgPaletteFromItem(bgItem)) || THEMES[(wave - 1) % THEMES.length];
-    const bgImg = bgItem ? bgImageCache.get(bgItem.tokenId) : null;
-    if (bgImg && bgImg !== "loading" && bgImg !== "error" && bgImg.naturalWidth) {
-      const iw = bgImg.naturalWidth, ih = bgImg.naturalHeight;
-      const scale = Math.max(cssW() / iw, cssH() / ih);
-      const dw = iw * scale, dh = ih * scale;
-      const dx = (cssW() - dw) / 2, dy = (cssH() - dh) / 2;
-      ctx.save();
-      ctx.globalAlpha = 0.55;
-      ctx.drawImage(bgImg, dx, dy, dw, dh);
-      ctx.restore();
-      // Oscurecemos encima para que las figuras/textos del juego sigan
-      // leyéndose bien sobre la imagen.
-      ctx.fillStyle = "rgba(6,3,14,0.55)";
-      ctx.fillRect(0, 0, cssW(), cssH());
-    } else {
-      // Mientras carga la primera imagen (o si falla): degradado liso.
-      const g0 = ctx.createLinearGradient(0, 0, 0, cssH());
-      g0.addColorStop(0, theme.top);
-      g0.addColorStop(1, theme.bottom);
-      ctx.fillStyle = g0;
-      ctx.fillRect(0, 0, cssW(), cssH());
-    }
+    // Un lugar real distinto por cada nivel de dificultad (ver
+    // COUNTRY_SCENES/getCountryIdx más arriba) — pedido explícito: "los
+    // fondos no me gustan, le falta vida, pon un lugar característico
+    // por nivel". La ilustración se dibuja una sola vez por nivel/tamaño
+    // de pantalla (ensureSceneCache) y de ahí en más solo se copia.
+    const idx = getCountryIdx();
+    ensureSceneCache(idx);
+    if (sceneCanvas) ctx.drawImage(sceneCanvas, 0, 0, cssW(), cssH());
+    const scene = COUNTRY_SCENES[idx];
 
-    // Tinte de color (del rasgo "Background" real de la pieza de fondo,
-    // o del tema por oleada de respaldo si no tiene ese rasgo).
-    const g = ctx.createLinearGradient(0, 0, 0, cssH());
-    g.addColorStop(0, theme.top + "55");
-    g.addColorStop(1, theme.bottom + "55");
-    ctx.fillStyle = g;
+    // Oscurecido leve encima del paisaje, solo para que el avatar, los
+    // r3tards y los textos se sigan leyendo bien — mucho más sutil que
+    // antes (0.55 → 0.32) para no "apagarle la vida" a la ilustración.
+    ctx.fillStyle = "rgba(6,3,14,0.32)";
     ctx.fillRect(0, 0, cssW(), cssH());
 
-    // Resplandor pulsante de fondo
+    // Resplandor pulsante con el color de acento del propio lugar.
     const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 900);
     const rg = ctx.createRadialGradient(cssW() / 2, cssH() * 0.35, 0, cssW() / 2, cssH() * 0.35, cssW() * 0.7);
-    rg.addColorStop(0, theme.accent + Math.round(18 + pulse * 14).toString(16).padStart(2, "0"));
+    rg.addColorStop(0, scene.accent + Math.round(16 + pulse * 12).toString(16).padStart(2, "0"));
     rg.addColorStop(1, "transparent");
     ctx.fillStyle = rg;
     ctx.fillRect(0, 0, cssW(), cssH());
@@ -1345,49 +1783,78 @@ const R3Game = (() => {
    * — así la MISMA pieza (ej. "Cranium") siempre se ve exactamente
    * igual cada vez que cae, partida tras partida.
    */
+  // Pedido explícito: "quiero total personalización de todos y cada uno
+  // de los legendarios, desde su aura, sus sonidos, las cosas que tiran,
+  // su comportamiento". Cada tema elemental (ya eran 8, y ya se elegían
+  // por hash del tokenId — ver auraThemeFor) ahora ADEMÁS define: qué le
+  // gusta tirarle al avatar (throwKinds), qué grita mientras caza al
+  // jugador (taunts — cuadros de texto flotantes con frases variadas),
+  // un tono de voz propio para sus sonidos (pitch — ver hitImpact/death
+  // en audio.js), su forma de moverse (quirk) y qué tan duro es en
+  // relación a los demás (hardness, 0=el más suave, 7=el más bravo) —
+  // así cada legendario se siente de verdad como un personaje distinto,
+  // no solo un color de aura distinto. "otro_r3tard"/"pato"/"perro"/
+  // "tv"/"calzoncillo" se dibujan como emoji (ver drawEnemyThrow); ver
+  // MONAD_SPAMMER_NAMES para el caso aparte de Keone/James.
   const LEGENDARY_AURA_THEMES = [
     {
       key: "fuego", glowColor: "#ff7a1a", raySpokes: 8, rayStyle: "line",
       wave: { rings: 4, amp: 11, freq: 8, speed: 4.2, spacing: 8, width: 2.6, glow: 22, colors: ["#fff3b0", "#ff9a3d", "#ff3d1a", "#ff9a3d"] },
+      throwKinds: ["tomate", "roca", "rayo"], pitch: 0.82, quirk: "charger", hardness: 4,
+      taunts: ["🔥 ¡Arde con esto!", "Soy pura candela", "¿Sientes el calor?", "Te voy a achicharrar"],
     },
     {
       key: "agua", glowColor: "#3ec6ff", raySpokes: 6, rayStyle: "dot",
       wave: { rings: 4, amp: 5.5, freq: 5, speed: 1.7, spacing: 10, width: 2.4, glow: 20, colors: ["#bdf1ff", "#3ec6ff", "#1a6fff", "#3ec6ff"] },
+      throwKinds: ["pato", "tomate", "hueso"], pitch: 1.15, quirk: "weaver", hardness: 1,
+      taunts: ["🌊 ¡Prepárate a mojarte!", "Fluyo donde quiera", "Nadando hacia la victoria", "Splash"],
     },
     {
       key: "tierra", glowColor: "#b08d4a", raySpokes: 6, rayStyle: "rock",
       wave: { rings: 3, amp: 4, freq: 4, speed: 1.3, spacing: 11, width: 3.4, glow: 16, colors: ["#c9a15a", "#7a5a2a", "#9ee08a", "#7a5a2a"] },
+      throwKinds: ["roca", "basura", "hueso"], pitch: 0.8, quirk: "tank", hardness: 0,
+      taunts: ["🪨 Sólido como roca", "No me vas a mover", "Esto sí que pesa", "Duro de romper"],
     },
     {
       key: "rayos", glowColor: "#fff36a", raySpokes: 9, rayStyle: "jagged",
       wave: { rings: 3, amp: 13, freq: 11, speed: 6.5, spacing: 7, width: 1.8, glow: 26, colors: ["#ffffff", "#fff36a", "#8ecbff", "#fff36a"] },
+      throwKinds: ["rayo", "laser", "rayo"], pitch: 1.35, quirk: "teleport", hardness: 7,
+      taunts: ["⚡ ¡Sentirás la descarga!", "Más rápido que la luz", "Aquí, allá... ¡atrápame!", "Electrizante, ¿no?"],
     },
     {
       key: "cristal", glowColor: "#c77dff", raySpokes: 7, rayStyle: "diamond",
       wave: { rings: 4, amp: 8, freq: 7.5, speed: 3.2, spacing: 9, width: 2.2, glow: 26, colors: ["#f3d9ff", "#c77dff", "#ff9de3", "#c77dff"] },
+      throwKinds: ["disco", "roca", "laser"], pitch: 1.2, quirk: "teleport", hardness: 5,
+      taunts: ["💎 Filoso como el cristal", "Reluciente y letal", "Brillo mortal", "Nunca me quiebro"],
     },
     {
       key: "viento", glowColor: "#bdf2c9", raySpokes: 6, rayStyle: "arc",
       wave: { rings: 3, amp: 6, freq: 9, speed: 5.5, spacing: 9, width: 1.6, glow: 16, colors: ["#ffffff", "#bdf2c9", "#eafff0"] },
+      throwKinds: ["calzoncillo", "tv", "basura"], pitch: 1.25, quirk: "weaver", hardness: 2,
+      taunts: ["💨 ¡Que te lleve el viento!", "Ligero pero letal", "Sopla fuerte hoy", "Atrápame si puedes"],
     },
     {
       key: "cosmico", glowColor: "#b06bff", raySpokes: 10, rayStyle: "twinkle",
       wave: { rings: 4, amp: 7, freq: 6, speed: 2.6, spacing: 10, width: 2, glow: 28, colors: ["#e6d6ff", "#b06bff", "#4d2b8f", "#b06bff"] },
+      throwKinds: ["otro_r3tard", "disco", "rayo"], pitch: 0.7, quirk: "teleport", hardness: 6,
+      taunts: ["🌌 Vengo de otra dimensión", "El cosmos me protege", "Nada es coincidencia", "Ni me viste llegar"],
     },
     {
       key: "toxico", glowColor: "#9dff5e", raySpokes: 7, rayStyle: "bubble",
       wave: { rings: 3, amp: 9, freq: 5, speed: 2.4, spacing: 10, width: 2.4, glow: 18, colors: ["#e2ff9d", "#9dff5e", "#2b7a1a", "#9dff5e"] },
+      throwKinds: ["perro", "basura", "tomate"], pitch: 0.9, quirk: "tank", hardness: 3,
+      taunts: ["☠️ No respires cerca", "Contaminando el ambiente", "Tóxico y orgulloso", "Aléjate si puedes"],
     },
   ];
-  function auraThemeFor(n) {
+  function auraThemeFor(tokenId) {
     let h = 0;
-    const s = String(n.tokenId);
+    const s = String(tokenId);
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
     return LEGENDARY_AURA_THEMES[h % LEGENDARY_AURA_THEMES.length];
   }
 
   function drawFluorescentWave(n) {
-    const cfg = n.tierKey === "legendary" ? auraThemeFor(n).wave : WAVE_CFG[n.tierKey];
+    const cfg = n.tierKey === "legendary" ? auraThemeFor(n.tokenId).wave : WAVE_CFG[n.tierKey];
     if (!cfg) return;
     const t = performance.now() / 1000;
     const baseR = n.size / 2 + 5;
@@ -1542,7 +2009,7 @@ const R3Game = (() => {
     // "Aura" real de esa pieza (n.auraColor, ver spawnNFT) cuando la
     // colección lo trae; si no lo trae, cae de respaldo al tema por
     // tier de siempre.
-    const legendaryTheme = n.tierKey === "legendary" ? auraThemeFor(n) : null;
+    const legendaryTheme = n.tierKey === "legendary" ? auraThemeFor(n.tokenId) : null;
     const auraColor = n.auraColor || (legendaryTheme ? legendaryTheme.glowColor : n.tier.color);
     const auraIntensity = { uncommon: 0.18, rare: 0.34, epic: 0.55, legendary: 0.95 }[n.tierKey] || 0;
     if (auraIntensity > 0) {
@@ -1735,6 +2202,62 @@ const R3Game = (() => {
         ctx.arc(x, y, 3.2, 0, Math.PI * 2);
         ctx.fill();
       });
+    } else if (p.kind === "pato" || p.kind === "perro" || p.kind === "tv" || p.kind === "calzoncillo" || p.kind === "otro_r3tard") {
+      // Objetos "de personalidad" que solo tiran ciertos legendarios (ver
+      // LEGENDARY_AURA_THEMES.throwKinds) — se dibujan como emoji: nada
+      // de imágenes externas que descargar, y de un vistazo se reconoce
+      // qué es sin necesitar arte propio para cada uno.
+      const EMOJI = { pato: "🦆", perro: "🐕", tv: "📺", calzoncillo: "🩲", otro_r3tard: "🫠" };
+      ctx.rotate(-p.rot); // los emoji no deben girar "de cabeza": se leen siempre igual
+      ctx.font = "20px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(EMOJI[p.kind], 0, 1);
+    } else if (p.kind === "rayo") {
+      // Rayo/lightning — firma de los legendarios eléctricos (rayos/cósmico).
+      ctx.fillStyle = p.color || "#fff36a";
+      ctx.strokeStyle = "#fffbe0";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-3, -11);
+      ctx.lineTo(3, -2);
+      ctx.lineTo(-2, -1);
+      ctx.lineTo(4, 11);
+      ctx.lineTo(-4, 1);
+      ctx.lineTo(1, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    } else if (p.kind === "laser") {
+      // Rayo láser — un haz brillante en vez de un objeto sólido.
+      const g = ctx.createLinearGradient(0, -14, 0, 14);
+      g.addColorStop(0, "rgba(255,80,140,0)");
+      g.addColorStop(0.5, p.color || "#ff5e9c");
+      g.addColorStop(1, "rgba(255,80,140,0)");
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 3.5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.lineTo(0, 14);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.lineTo(0, 14);
+      ctx.stroke();
+    } else if (p.kind === "disco") {
+      // Disco/gema — firma del legendario "cristal".
+      ctx.fillStyle = p.color || "#c77dff";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.6)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 10, 4, 0, 0, Math.PI * 2);
+      ctx.stroke();
     } else {
       // "tomate"
       ctx.fillStyle = "#e0503a";
@@ -1830,8 +2353,11 @@ const R3Game = (() => {
    * Arma que el avatar va desbloqueando (ver WEAPON_TIER_META/
    * currentWeaponTier) — pedido explícito: "ajustada al personaje", así
    * que se dibuja pegada al avatar y a su mismo tamaño relativo (nunca
-   * más grande que el propio avatar), mirando hacia donde apuntó el
-   * último disparo (lastFireDir).
+   * más grande que el propio avatar), apuntando EXACTAMENTE hacia donde
+   * fue el último disparo (lastFireAngle) — no solo mirando a la
+   * izquierda/derecha como antes, sino rotada al ángulo real, así que
+   * la mayoría del tiempo se ve vertical (apuntando hacia arriba, de
+   * donde caen los r3tards) en vez de siempre horizontal.
    */
   function drawWeapon() {
     const tier = currentWeaponTier();
@@ -1843,15 +2369,21 @@ const R3Game = (() => {
     const x = avatarX;
     const y = cssH() - AVATAR_Y_OFFSET;
     const r = 30;
-    const flip = lastFireDir < 0 ? -1 : 1;
+    // Se mira hacia la izquierda o la derecha según el signo de la
+    // componente horizontal del ángulo (nunca queda "de cabeza"), y
+    // dentro de eso rota libremente — así puede apuntar derecho hacia
+    // arriba (vertical) sin verse invertida.
+    const flip = Math.cos(lastFireAngle) < 0 ? -1 : 1;
+    const theta = flip === 1 ? lastFireAngle : Math.PI - lastFireAngle;
     const targetW = r * 1.7; // ajustada al tamaño del avatar (r=30), no más grande que él
     const scale = targetW / img.naturalWidth;
     const w = img.naturalWidth * scale;
     const h = img.naturalHeight * scale;
 
     ctx.save();
-    ctx.translate(x + flip * r * 0.5, y + r * 0.1);
+    ctx.translate(x, y + r * 0.1);
     ctx.scale(flip, 1);
+    ctx.rotate(theta);
     ctx.drawImage(img, -w * 0.12, -h / 2, w, h);
     ctx.restore();
   }
@@ -1927,8 +2459,9 @@ const R3Game = (() => {
     certifiedKills = 0;
     legendaryKills = 0;
     legendariesSpawned = 0;
+    activeThrowers = [];
     sessionKilledIds = new Set();
-    lastFireDir = 1;
+    lastFireAngle = -Math.PI / 2;
     lastAnnouncedWeaponTier = 0;
     spawnTimer = 600;
     spawnFlash = null;
@@ -1943,13 +2476,9 @@ const R3Game = (() => {
       (tierBuckets[key] = tierBuckets[key] || []).push(it);
     }
 
-    // Fondo dinámico: lista ordenada de menos a más raro, empezando
-    // siempre en el más común. bgImageCache NO se limpia entre partidas
-    // (las imágenes ya descargadas se pueden reusar tal cual).
-    bgSortedList = [...collection].sort((a, b) => (a.rarityScore || 0) - (b.rarityScore || 0));
-    bgIndex = 0;
-    bgChangeTimer = 10000 + Math.random() * 10000;
-    if (bgSortedList.length > 0) loadBgImageAt(0);
+    // Fondo: se invalida el cache de la escena (ver ensureSceneCache) para
+    // que la primera partida siempre arranque dibujando de cero.
+    sceneCacheKey = "";
 
     // Avatar: siempre el r3tard menos raro de la colección.
     avatarItem = pickDefaultAvatarItem(collection);
@@ -1973,6 +2502,8 @@ const R3Game = (() => {
     onWaveChange(wave, THEMES[0].name);
     onDifficultyChange(0, CFG.SPAWN_PROGRESSION.durationMinutes);
     onProgress(0, collection.length);
+    R3Audio.setMusicIntensity(0);
+    R3Audio.startMusic();
     running = true;
     lastTs = performance.now();
     rafId = requestAnimationFrame(loop);
@@ -1981,6 +2512,7 @@ const R3Game = (() => {
   function endGame() {
     running = false;
     if (rafId) cancelAnimationFrame(rafId);
+    R3Audio.stopMusic();
     R3Audio.gameOver();
     onGameOver({ score, bestCombo, killsByTier, certifiedKills, wave, survivalMs: performance.now() - sessionStartTs, victory: false });
   }
@@ -1992,7 +2524,8 @@ const R3Game = (() => {
   function winGame() {
     running = false;
     if (rafId) cancelAnimationFrame(rafId);
-    R3Audio.waveUp();
+    R3Audio.stopMusic();
+    R3Audio.victory();
     onGameOver({ score, bestCombo, killsByTier, certifiedKills, wave, survivalMs: performance.now() - sessionStartTs, victory: true });
   }
 
@@ -2001,6 +2534,7 @@ const R3Game = (() => {
     keyLeft = false;
     keyRight = false;
     pointerActive = false;
+    R3Audio.stopMusic();
     if (rafId) cancelAnimationFrame(rafId);
   }
 

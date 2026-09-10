@@ -49,7 +49,11 @@ window.R3_CONFIG = {
   // se usa para mostrar un texto de transparencia en el menú si quieres.
   // ⚠️ Esta debe ser también la dirección que pongas como "initialOwner"
   // al desplegar el contrato en Remix (ver README.md).
-  OWNER_WALLET_DISPLAY: "0xA320dAA989Ae8d6D7813340697f4f9e75f5B78E8",
+  // (Corregido: la versión anterior tenía mayúsculas/minúsculas mal —
+  // misma dirección real, pero con un "checksum" EIP-55 inválido que
+  // hace que ethers.js la rechace con "bad address checksum" apenas
+  // algo intente validarla. Esta ya está bien escrita.)
+  OWNER_WALLET_DISPLAY: "0xa320Daa989ae8d6d7813340697F4F9E75F5b78E8",
 
   // ---- Precio de la partida (debe coincidir con playPrice() del contrato) ----
 

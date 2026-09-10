@@ -23,6 +23,17 @@
       </h1>
       <p class="subtitle">Los <strong>r3tards</strong> de Monad están cayendo. Dispárales antes de que lleguen al suelo.</p>
 
+      <!-- Vitrina con piezas REALES de la colección (no arte de relleno) —
+           se llena sola apenas carga la colección (ver main.js) y va
+           rotando cada tanto, para que se sienta viva desde el menú, antes
+           incluso de jugar. -->
+      <div class="menu-showcase" id="menu-showcase" aria-hidden="true">
+        <div class="showcase-slot"><img class="showcase-img" data-slot="0" alt="" /></div>
+        <div class="showcase-slot"><img class="showcase-img" data-slot="1" alt="" /></div>
+        <div class="showcase-slot"><img class="showcase-img" data-slot="2" alt="" /></div>
+        <div class="showcase-slot"><img class="showcase-img" data-slot="3" alt="" /></div>
+      </div>
+
       <div class="stat-row">
         <div class="stat-pill">
           <span class="stat-label">Colección</span>
@@ -47,6 +58,12 @@
         <button id="btn-connect" class="btn btn-secondary">🔌 Conectar wallet</button>
         <button id="btn-play" class="btn btn-primary">🎮 Jugar (— MON)</button>
       </div>
+
+      <!-- Aclaración explícita del costo real — pedido explícito: decir
+           claramente que el juego no vale nada, y que lo único que se
+           paga es el gas normal de la red (ver texto exacto en main.js,
+           que ya sabe si el precio on-chain es 0 o no). -->
+      <p id="fee-note" class="fee-note"></p>
 
       <p id="wallet-status" class="wallet-status">No conectado</p>
 
@@ -107,7 +124,14 @@
         <div class="hud-progress">r3tards distintos: <span id="hud-progress">0/0</span></div>
       </div>
       <div class="hud-right">
-        <div class="hud-lives" id="hud-lives"></div>
+        <button id="btn-mute-music" class="hud-mute-btn" type="button" title="Silenciar/activar la música de fondo">🔊 Música</button>
+        <div class="hud-lives-block">
+          <div class="hud-lives-title">Vidas</div>
+          <div class="hud-lives" id="hud-lives"></div>
+        </div>
+        <div class="hud-weapon" id="hud-weapon">
+          <span class="hud-weapon-label">Arma: <span id="hud-weapon-name">puños</span></span>
+        </div>
         <div class="hud-combo" id="hud-combo" hidden></div>
       </div>
     </div>

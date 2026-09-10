@@ -353,6 +353,14 @@ const R3Loader = (() => {
     // sentido seguir intentando 25 lotes más (cada uno probando los mismos
     // 5 endpoints) — eso es lo que hacía que "cargando" se quedara colgado
     // varios minutos. En vez de eso, fallamos rápido con un mensaje claro.
+    // Si un lote (que no sea el primero) falla contra TODOS los RPCs, esos
+    // ids NO se cuentan como "quemados/inexistentes" (bug real corregido
+    // aquí: antes se colaban silenciosamente como si no existieran, y el
+    // usuario terminaba viendo el mensaje genérico y confuso de "la
+    // colección está incompleta" en vez de enterarse de que fue un corte
+    // de RPC a mitad de la carga). Se cuentan aparte y se avisa con
+    // claridad al final.
+    let rpcFailedCount = 0;
     for (let i = 0; i < ids.length; i += BATCH) {
       const batchIds = ids.slice(i, i + BATCH);
       let batchResults = [];
@@ -364,16 +372,25 @@ const R3Loader = (() => {
             `No se pudo conectar a ningún RPC de Monad (${describeErr(err)}). Puede ser tu red/firewall bloqueando esos dominios, o que los RPC públicos estén saturados en este momento. Revisa la consola del navegador (F12) para más detalle, o intenta de nuevo en unos minutos.`
           );
         }
-        batchResults = batchIds.map((id) => ({ id, uri: null }));
+        rpcFailedCount += batchIds.length;
+        batchResults = batchIds.map((id) => ({ id, uri: null, exists: null }));
       }
       for (const r of batchResults) {
         if (r.uri) uriEntries.push(r);
         else if (r.exists) {
           throw new Error(`El token #${r.id} existe pero tokenURI() no respondió correctamente.`);
         }
-        // exists=false: token inexistente/burned, no se agrega a la colección.
+        // exists === false: token inexistente/burned, no se agrega a la
+        // colección. exists === null: no se sabe (falló el RPC en este
+        // lote), ver rpcFailedCount más abajo — nunca se trata como burned.
       }
       onProgress && onProgress(Math.min(i + BATCH, ids.length), ids.length, "uri");
+    }
+
+    if (rpcFailedCount > 0) {
+      throw new Error(
+        `No se pudieron leer ${rpcFailedCount} tokens: los RPC de Monad dejaron de responder a mitad de la carga (probablemente saturados o caídos un momento). Intenta de nuevo en unos minutos.`
+      );
     }
 
     if (uriEntries.length !== totalSupply) {
