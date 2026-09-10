@@ -445,6 +445,16 @@ Pediste explícitamente: *"revisa que cada vez que termine la partida se sobresc
 
 **Aviso importante para el despliegue**: igual que en la sección 7.10, estos cambios están en el contrato y **todavía no lo has desplegado** — sigue siendo tu única oportunidad de tener `recordMatch()`/el registro global de kills desde el primer despliegue. Sigue la sección 1 de este README normalmente, ya incluye este contrato actualizado (con el mismo requisito de "Enable viaIR" de siempre).
 
+## 7.19) `coleccion.html` vuelve a ser LOCAL (solo tus propios kills, no los de todos)
+
+Tras leer la sección 7.18 (donde te avisé del cambio de criterio hacia el dato GLOBAL), respondiste explícitamente: *"esto aparece para cada jugador, debe ser su recuento no el de todos"*. Con eso, `coleccion.html` volvió a la idea original que habías elegido la primera vez que se te preguntó (antes de que existiera el registro global): esta página ahora muestra **tu propio historial de kills, no el de todos los jugadores juntos**.
+
+**Qué cambió técnicamente**: la página ya NO lee el evento `TokenKilled` del contrato (ese dato sigue existiendo on-chain, global, y lo sigue usando internamente el propio contrato para no volver a contar dos veces un mismo r3tard entre distintos jugadores — solo que esta página ya no lo consulta). En su lugar, ahora necesitas **conectar tu wallet** (mismo botón "🔌 Conectar wallet" que ya usa `logros.html`) y la página lee `R3Achievements.getKills(tuWallet)` — el mismo localStorage de "Mis logros" que ya existía desde hace varias rondas. Antes de conectar, la colección se ve completa en oscuro (como si no hubieras matado nada todavía); apenas conectas, se colorea según lo que tú específicamente has matado **en ese navegador**.
+
+**Esto significa, otra vez, la misma limitación ya conocida de "Mis logros"**: es un dato local de tu navegador, no on-chain — si juegas desde el celular y luego revisas la colección desde la computadora, vas a ver todo en oscuro ahí (no porque no hayas matado nada, sino porque ese navegador no tiene ese historial guardado). Si en el futuro quieres que esto sí viaje entre dispositivos, la única forma sería volver a la versión global (lo que se descartó ahora) o agregar un registro on-chain por-wallet (no solo el global) — ninguna de las dos está hecha, avisa si te interesa explorarlo.
+
+**Verificación**: `node --check` limpio en `coleccion.html`/`js/i18n.js`. Prueba con Playwright rehecha desde cero para el nuevo flujo (conectar wallet falsa → localStorage con dos kills de prueba pre-cargado → confirma que ANTES de conectar todo se ve sin matar, y DESPUÉS de conectar los dos tokens de prueba aparecen a color) — sin errores nuevos de consola. Regresión completa del resto del juego (`smoke.mjs`) sin cambios ni errores nuevos (esta ronda no tocó `game.js`/`main.js`/el contrato).
+
 ## 8) Ideas para una v2 (no incluidas todavía)
 
 - Vidas/dificultad ajustable desde `config.js` (`MAX_LIVES`, tabla `TIERS`) por si quieres rebalancear el juego sin tocar el motor.

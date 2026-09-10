@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>Colección — R3 APOCALIPSIS</title>
-<meta name="description" content="Todos los r3tards de la colección: en color los que ya cayeron en batalla (on-chain, para siempre), en oscuro los que siguen con vida. Filtra por rareza." />
+<meta name="description" content="Conecta tu wallet y mira, de los 1033 r3tards de la colección, cuáles ya has matado tú (a color) y cuáles no (en oscuro). Filtra por rareza." />
 <link rel="icon" href="assets/monad-orb.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -20,16 +20,18 @@
       <button type="button" class="btn btn-secondary btn-small lang-toggle-btn" data-lang-toggle>🌐 ES</button>
       <h1 class="title" style="font-size: clamp(1.6rem, 6vw, 2.2rem);">📖 <span class="title-r3" data-i18n="title.collection_word1">Colección</span> <span class="title-apoc" data-i18n="title.collection_word2">R3tards</span></h1>
       <p class="subtitle">
-        <span data-i18n="collection.subtitle_pre">Los </span><strong data-i18n="collection.subtitle_strong">1033 r3tards</strong><span data-i18n="collection.subtitle_mid"> de la colección — a </span><strong data-i18n="collection.subtitle_color">todo color</strong><span data-i18n="collection.subtitle_mid2"> los que ya cayeron en batalla (evento </span><code data-i18n="collection.subtitle_code">TokenKilled</code><span data-i18n="collection.subtitle_dark_wrap">) — en </span><strong data-i18n="collection.subtitle_dark">oscuro</strong><span data-i18n="collection.subtitle_end"> los que siguen con vida — cualquier jugador, para siempre. Es un dato global on-chain, no depende de tu wallet.</span>
+        <span data-i18n="collection.subtitle_pre">Conecta la misma wallet con la que jugaste — vas a ver, de los </span><strong data-i18n="collection.subtitle_strong">1033 r3tards</strong><span data-i18n="collection.subtitle_mid"> de la colección, a </span><strong data-i18n="collection.subtitle_you">todo color</strong><span data-i18n="collection.subtitle_post"> los que TÚ ya has matado, y en oscuro el resto. Es tu registro personal, guardado </span><strong data-i18n="collection.subtitle_local">solo en este navegador</strong><span data-i18n="collection.subtitle_end"> — igual que en "Mis logros", no viaja entre dispositivos.</span>
       </p>
 
       <div class="menu-actions">
+        <button id="btn-connect-coleccion" class="btn btn-primary" data-i18n="wallet.connect_btn">🔌 Conectar wallet</button>
         <a href="index.html" class="btn btn-secondary" data-i18n="nav.back_to_game">🎮 Volver al juego</a>
         <a href="ranking.html" class="btn btn-secondary" data-i18n="nav.ranking">🥇 Ranking</a>
         <a href="medallas.html" class="btn btn-secondary" data-i18n="nav.medals">🎖️ Medallas</a>
         <a href="logros.html" class="btn btn-secondary" data-i18n="nav.my_kills">🏆 Mis logros</a>
       </div>
 
+      <p id="coleccion-status" class="wallet-status" data-i18n="wallet.not_connected">No conectado</p>
       <p id="coleccion-error" class="menu-error" hidden></p>
       <div id="coleccion-progress" class="progress-wrap">
         <div class="progress-label" id="coleccion-progress-label" data-i18n="collection.loading_collection">Cargando la colección…</div>
@@ -53,14 +55,16 @@
   <script src="js/i18n.js"></script>
   <script src="js/abis.js"></script>
   <script src="js/wallet.js"></script>
-  <script src="js/onchain-events.js"></script>
   <script src="js/nft-loader.js"></script>
+  <script src="js/achievements.js"></script>
   <script>
     (function () {
       const CFG = window.R3_CONFIG;
       const I18N = window.R3I18N;
       I18N.applyStaticTranslations();
 
+      const btnConnect = document.getElementById("btn-connect-coleccion");
+      const statusEl = document.getElementById("coleccion-status");
       const errorEl = document.getElementById("coleccion-error");
       const progressWrap = document.getElementById("coleccion-progress");
       const progressBar = document.getElementById("coleccion-progress-bar");
@@ -75,8 +79,9 @@
       const TIER_COLOR = { common: "#c9c9d6", uncommon: "#7cc4ff", rare: "#5eead4", epic: "#c77dff", legendary: "#ffd166" };
 
       let fullCollection = null; // colección completa, ordenada por rareza
-      let deadTokenIds = new Set(); // tokenIds con al menos un TokenKilled (global, on-chain)
+      let deadTokenIds = new Set(); // tokenIds que ESTA wallet ha matado, según localStorage (R3Achievements)
       let activeTier = "all";
+      let lastAddress = null; // se recuerda para poder re-pintar al cambiar de idioma
 
       function showError(msg) {
         errorEl.textContent = msg;
@@ -145,47 +150,39 @@
           .join("");
       }
 
-      // ---- Carga: colección completa + eventos TokenKilled ------------
+      // ---- Recalcula qué ha matado ESTA wallet, solo con datos locales ----
+      // (mismo localStorage que usa logros.html — R3Achievements, ver
+      // js/achievements.js). No se lee nada de la cadena para esto.
+      function recomputeDead(address) {
+        if (!address) {
+          deadTokenIds = new Set();
+          return;
+        }
+        const kills = R3Achievements.getKills(address);
+        deadTokenIds = new Set(kills.map((k) => Number(k.tokenId)));
+      }
+
+      function revealResults() {
+        progressWrap.hidden = true;
+        resultsEl.hidden = false;
+        renderSummary();
+        renderFilterPills();
+        renderGrid();
+      }
+
+      // ---- Carga: solo la colección completa (no depende de wallet) ------
       async function loadEverything() {
         try {
           const collection = await R3Loader.loadCollection((loaded, total, phase) => {
             const phasePct = total ? loaded / total : 0;
-            const overallPct = phase === "metadata" ? 25 + phasePct * 25 : phase === "uri" ? phasePct * 25 : phasePct * 50;
-            progressBar.style.width = Math.round(Math.min(50, overallPct)) + "%";
+            const overallPct = phase === "metadata" ? 50 + phasePct * 50 : phasePct * 50;
+            progressBar.style.width = Math.round(Math.min(100, overallPct)) + "%";
             progressLabel.textContent = I18N.t("collection.loading_collection");
           });
           // Orden por rareza (legendario primero), igual que el resto del sitio.
           fullCollection = [...collection].sort((a, b) => (a.rarityRank || 0) - (b.rarityRank || 0));
-
-          if (R3Wallet.isContractConfigured()) {
-            progressLabel.textContent = I18N.t("collection.reading_kills");
-            try {
-              const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, window.R3_ABIS.GAME, R3Events.getProvider());
-              const fromBlock = Number(CFG.GAME_CONTRACT_DEPLOY_BLOCK) || 0;
-              const toBlock = await R3Events.getLatestBlock();
-              const logs = await R3Events.queryLogsChunked(contract, "TokenKilled", fromBlock, toBlock, (done, total) => {
-                progressBar.style.width = 50 + Math.round((done / total) * 50) + "%";
-              });
-              // Cada tokenId solo puede emitir TokenKilled UNA vez en toda la
-              // vida del contrato (ver everKilledGloballyBitmap en
-              // R3Apocalipsis.sol) — el Set ya queda deduplicado por diseño,
-              // pero usamos Set de todos modos por claridad y por si acaso.
-              deadTokenIds = new Set(logs.map((log) => Number(log.args.tokenId)));
-            } catch (err) {
-              console.error(err);
-              showError((err && err.message) || I18N.t("err.collection_kills_read_failed"));
-              deadTokenIds = new Set();
-            }
-          } else {
-            showError(I18N.t("err.collection_contract_not_configured"));
-            deadTokenIds = new Set();
-          }
-
-          progressWrap.hidden = true;
-          resultsEl.hidden = false;
-          renderSummary();
-          renderFilterPills();
-          renderGrid();
+          recomputeDead(lastAddress);
+          revealResults();
         } catch (err) {
           console.error(err);
           progressWrap.hidden = true;
@@ -193,9 +190,30 @@
         }
       }
 
+      btnConnect.addEventListener("click", async () => {
+        errorEl.hidden = true;
+        btnConnect.disabled = true;
+        try {
+          const addr = await R3Wallet.connect();
+          lastAddress = addr;
+          statusEl.textContent = I18N.t("wallet.connected", { addr: R3Wallet.shortAddress(addr) });
+          recomputeDead(addr);
+          if (fullCollection) {
+            renderSummary();
+            renderFilterPills();
+            renderGrid();
+          }
+        } catch (err) {
+          console.error(err);
+          showError((err && err.message) || I18N.t("err.wallet_connect_failed"));
+        } finally {
+          btnConnect.disabled = false;
+        }
+      });
+
       window.addEventListener("r3langchange", () => {
         // Re-pinta todo (nombres de tier, etiquetas de estado) en el idioma
-        // nuevo, sin releer nada de la cadena ni de los gateways de nuevo.
+        // nuevo, sin releer nada de localStorage ni de la colección de nuevo.
         if (fullCollection) {
           renderSummary();
           renderFilterPills();
