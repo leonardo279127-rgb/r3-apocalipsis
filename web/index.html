@@ -18,10 +18,18 @@
     <div class="menu-bg-fx" aria-hidden="true"></div>
 
     <div class="menu-card">
+      <!-- Botón de idioma (ver js/i18n.js) — pedido implícito al pedir que
+           el juego "sirva para cada idioma según donde esté conectado": la
+           detección automática (navigator.language) puede adivinar mal,
+           así que se deja este botón discreto para cambiarlo a mano. Se
+           auto-cablea solo (texto + click) desde i18n.js, no hace falta
+           tocar main.js para que funcione. -->
+      <button type="button" class="btn btn-secondary btn-small lang-toggle-btn" data-lang-toggle>🌐 ES</button>
+
       <h1 class="title">
         <span class="title-r3">R3</span> <span class="title-apoc">APOCALIPSIS</span>
       </h1>
-      <p class="subtitle">Los <strong>r3tards</strong> de Monad están cayendo. Dispárales antes de que lleguen al suelo.</p>
+      <p class="subtitle"><span data-i18n="menu.subtitle_pre">Los </span><strong data-i18n="menu.subtitle_strong">r3tards</strong><span data-i18n="menu.subtitle_post"> de Monad están cayendo. Dispárales antes de que lleguen al suelo.</span></p>
 
       <!-- Vitrina con piezas REALES de la colección (no arte de relleno) —
            se llena sola apenas carga la colección (ver main.js) y va
@@ -36,26 +44,26 @@
 
       <div class="stat-row">
         <div class="stat-pill">
-          <span class="stat-label">Colección</span>
+          <span class="stat-label" data-i18n="stat.collection_label">Colección</span>
           <span class="stat-value">r3tards</span>
         </div>
         <div class="stat-pill">
-          <span class="stat-label">Red</span>
+          <span class="stat-label" data-i18n="stat.network_label">Red</span>
           <span class="stat-value">Monad Mainnet</span>
         </div>
         <div class="stat-pill">
-          <span class="stat-label">Costo</span>
+          <span class="stat-label" data-i18n="stat.cost_label">Costo</span>
           <span class="stat-value" id="price-display">— MON</span>
         </div>
       </div>
 
       <div id="collection-progress" class="progress-wrap" hidden>
-        <div class="progress-label" id="progress-label">Cargando colección r3tards desde Monad…</div>
+        <div class="progress-label" id="progress-label" data-i18n="progress.loading_collection_initial">Cargando colección r3tards desde Monad…</div>
         <div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div>
       </div>
 
       <div class="menu-actions">
-        <button id="btn-connect" class="btn btn-secondary">🔌 Conectar wallet</button>
+        <button id="btn-connect" class="btn btn-secondary" data-i18n="wallet.connect_btn">🔌 Conectar wallet</button>
         <button id="btn-play" class="btn btn-primary">🎮 Jugar (— MON)</button>
       </div>
 
@@ -65,16 +73,16 @@
            que ya sabe si el precio on-chain es 0 o no). -->
       <p id="fee-note" class="fee-note"></p>
 
-      <p id="wallet-status" class="wallet-status">No conectado</p>
+      <p id="wallet-status" class="wallet-status" data-i18n="wallet.not_connected">No conectado</p>
 
       <!-- Alias público on-chain: se usa como nombre en el ranking/medallas
            en vez de mostrar la dirección completa de la wallet. Solo
            aparece una vez conectada la wallet (y con el contrato ya
            configurado — sin contrato no hay dónde guardarlo). -->
       <div id="alias-row" class="alias-row" hidden>
-        <span class="alias-current" id="alias-current">Sin alias todavía</span>
-        <input id="alias-input" class="alias-input" type="text" maxlength="20" placeholder="Tu alias (máx. 20)" />
-        <button id="btn-save-alias" class="btn btn-secondary btn-small">💾 Guardar alias</button>
+        <span class="alias-current" id="alias-current" data-i18n="alias.none_yet_static">Sin alias todavía</span>
+        <input id="alias-input" class="alias-input" type="text" maxlength="20" placeholder="Tu alias (máx. 20)" data-i18n-attr="placeholder:alias.placeholder" />
+        <button id="btn-save-alias" class="btn btn-secondary btn-small" data-i18n="btn.save_alias">💾 Guardar alias</button>
       </div>
 
       <!-- Tarjeta de jugador: un NFT intransferible (no se vende ni se
@@ -82,29 +90,30 @@
            un alias/puntaje/logro — o aquí mismo a mano. Se "completa
            sola": la misma tarjeta va mostrando tu progreso más reciente. -->
       <div id="card-row" class="alias-row" hidden>
-        <span class="alias-current" id="card-status">Todavía no tienes tu tarjeta</span>
-        <button id="btn-mint-card" class="btn btn-secondary btn-small">🪪 Mintear mi tarjeta (gratis)</button>
+        <span class="alias-current" id="card-status" data-i18n="card.none_yet">Todavía no tienes tu tarjeta</span>
+        <button id="btn-mint-card" class="btn btn-secondary btn-small" data-i18n="btn.mint_card">🪪 Mintear mi tarjeta (gratis)</button>
       </div>
 
       <p id="menu-error" class="menu-error" hidden></p>
-      <button id="btn-retry-collection" class="btn btn-secondary" hidden>🔄 Reintentar carga de la colección</button>
+      <button id="btn-retry-collection" class="btn btn-secondary" hidden data-i18n="btn.retry_collection">🔄 Reintentar carga de la colección</button>
 
       <details class="how-to">
-        <summary>¿Cómo se juega?</summary>
+        <summary data-i18n="howto.summary">¿Cómo se juega?</summary>
         <ul>
-          <li>Conecta tu wallet (necesitas MON en Monad Mainnet).</li>
-          <li>Paga el costo de la partida: se cobra on-chain, una sola transacción, sin permisos raros.</li>
-          <li>Toca o haz clic para disparar el orbe de Monad hacia los NFTs que caen.</li>
-          <li>Entre más raro es el NFT, más grande, más resistente y más puntos vale. Si llega al suelo, pierdes una vida.</li>
+          <li data-i18n="howto.step1">Conecta tu wallet (necesitas MON en Monad Mainnet).</li>
+          <li data-i18n="howto.step2">Paga el costo de la partida: se cobra on-chain, una sola transacción, sin permisos raros.</li>
+          <li data-i18n="howto.step3">Toca o haz clic para disparar el orbe de Monad hacia los NFTs que caen.</li>
+          <li data-i18n="howto.step4">Entre más raro es el NFT, más grande, más resistente y más puntos vale. Si llega al suelo, pierdes una vida.</li>
         </ul>
       </details>
 
       <p class="footer-note">
-        Contrato de pago verificable on-chain · Colección real de
-        <a href="https://opensea.io/collection/r3tardsnft" target="_blank" rel="noopener">r3tardsnft en OpenSea</a>
-        · <a href="logros.html">🏆 Ver mis logros</a>
-        · <a href="ranking.html">🥇 Ranking global</a>
-        · <a href="medallas.html">🎖️ Medallas</a>
+        <span data-i18n="footer.payment_note">Contrato de pago verificable on-chain · Colección real de</span>
+        <a href="https://opensea.io/collection/r3tardsnft" target="_blank" rel="noopener" data-i18n="footer.opensea_link">r3tardsnft en OpenSea</a>
+        · <a href="logros.html" data-i18n="footer.my_achievements">🏆 Ver mis logros</a>
+        · <a href="ranking.html" data-i18n="footer.ranking">🥇 Ranking global</a>
+        · <a href="medallas.html" data-i18n="footer.medals">🎖️ Medallas</a>
+        · <a href="coleccion.html" data-i18n="footer.collection">📖 Colección</a>
       </p>
     </div>
   </section>
@@ -115,22 +124,22 @@
 
     <div class="hud">
       <div class="hud-left">
-        <div class="hud-score">Puntaje: <span id="hud-score">0</span></div>
-        <div class="hud-wave">Oleada <span id="hud-wave">1</span> — <span id="hud-wave-name">Grieta Inicial</span></div>
-        <div class="hud-difficulty" id="hud-difficulty" title="Sube un escalón cada minuto de partida">
-          Dificultad <span id="hud-difficulty-level">0</span>/<span id="hud-difficulty-max">10</span>
+        <div class="hud-score"><span data-i18n="hud.score_label">Puntaje:</span> <span id="hud-score">0</span></div>
+        <div class="hud-wave"><span data-i18n="hud.wave_label">Oleada</span> <span id="hud-wave">1</span> — <span id="hud-wave-name">Grieta Inicial</span></div>
+        <div class="hud-difficulty" id="hud-difficulty" title="Sube un escalón cada minuto de partida" data-i18n-attr="title:hud.difficulty_title">
+          <span data-i18n="hud.difficulty_label">Dificultad</span> <span id="hud-difficulty-level">0</span>/<span id="hud-difficulty-max">10</span>
           <div class="hud-difficulty-bar"><div class="hud-difficulty-fill" id="hud-difficulty-fill"></div></div>
         </div>
-        <div class="hud-progress">r3tards distintos: <span id="hud-progress">0/0</span></div>
+        <div class="hud-progress"><span data-i18n="hud.progress_label">r3tards distintos:</span> <span id="hud-progress">0/0</span></div>
       </div>
       <div class="hud-right">
-        <button id="btn-mute-music" class="hud-mute-btn" type="button" title="Silenciar/activar la música de fondo">🔊 Música</button>
+        <button id="btn-mute-music" class="hud-mute-btn" type="button" title="Silenciar/activar la música de fondo" data-i18n-attr="title:hud.mute_title">🔊 Música</button>
         <div class="hud-lives-block">
-          <div class="hud-lives-title">Vidas</div>
+          <div class="hud-lives-title" data-i18n="hud.lives_title">Vidas</div>
           <div class="hud-lives" id="hud-lives"></div>
         </div>
         <div class="hud-weapon" id="hud-weapon">
-          <span class="hud-weapon-label">Arma: <span id="hud-weapon-name">puños</span></span>
+          <span class="hud-weapon-label" data-i18n="hud.weapon_label">Arma:</span> <span id="hud-weapon-name">puños</span>
         </div>
         <div class="hud-combo" id="hud-combo" hidden></div>
       </div>
@@ -147,42 +156,50 @@
   <section id="screen-gameover" class="screen">
     <div class="menu-card gameover-card">
       <h2 class="gameover-title" id="go-title">FIN DEL APOCALIPSIS</h2>
-      <p class="gameover-victory" id="go-victory-note" hidden>🏆 ¡Mataste los 1033 r3tards distintos! Colección completa.</p>
-      <p class="gameover-score">Puntaje final: <span id="go-score">0</span></p>
-      <p class="gameover-sub">Mejor combo: <span id="go-combo">0</span>x · Oleada alcanzada: <span id="go-wave">1</span> · r3tards distintos: <span id="go-progress">0/0</span></p>
+      <p class="gameover-victory" id="go-victory-note" hidden data-i18n="go.victory_note">🏆 ¡Mataste los 1033 r3tards distintos! Colección completa.</p>
+      <p class="gameover-score"><span data-i18n="go.score_label">Puntaje final:</span> <span id="go-score">0</span></p>
+      <p class="gameover-sub">
+        <span data-i18n="go.best_combo_label">Mejor combo:</span> <span id="go-combo">0</span>x ·
+        <span data-i18n="go.wave_reached_label">Oleada alcanzada:</span> <span id="go-wave">1</span> ·
+        <span data-i18n="go.distinct_label">r3tards distintos:</span> <span id="go-progress">0/0</span>
+      </p>
       <ul class="kill-breakdown" id="go-breakdown"></ul>
 
       <!-- Logros conseguidos ESTA partida (independiente de si ya se
            guardaron on-chain o no — esto solo muestra lo que la partida
            misma ya cumplió). -->
       <div id="go-achievements-earned" class="go-achievements" hidden>
-        <div class="go-achievements-title">🎖️ Logros conseguidos esta partida</div>
+        <div class="go-achievements-title" data-i18n="go.achievements_title">🎖️ Logros conseguidos esta partida</div>
         <ul id="go-achievements-list" class="achv-badges"></ul>
       </div>
 
-      <!-- Guardar puntaje/logros on-chain: solo aparece con wallet
-           conectada y el contrato ya configurado (en modo prueba no hay
-           nada que guardar, es gratis y sin wallet). -->
+      <!-- Guardado on-chain: automático apenas termina la partida (si ya
+           hay wallet conectada) — puntaje, logros nuevos y qué r3tards se
+           cazaron, todo junto en una sola transacción. Solo aparece con
+           el contrato ya configurado (en modo prueba no hay nada que
+           guardar, es gratis y sin wallet). El botón de reintentar queda
+           oculto salvo que el guardado automático falle (wallet
+           rechazada, sin gas, etc.) — así el jugador nunca se queda sin
+           forma de guardar su progreso. -->
       <div id="go-onchain" class="go-onchain" hidden>
         <p id="go-onchain-status" class="wallet-status"></p>
         <div class="menu-actions">
-          <button id="btn-save-score" class="btn btn-secondary">🏆 Guardar puntaje en el ranking</button>
-          <button id="btn-save-achievements" class="btn btn-secondary">🎖️ Guardar logros nuevos</button>
+          <button id="btn-retry-save" class="btn btn-secondary" data-i18n="btn.retry_save" hidden>🔁 Reintentar guardado</button>
         </div>
       </div>
       <div id="go-connect-hint" class="go-onchain" hidden>
-        <p class="wallet-status">Conecta tu wallet para guardar este puntaje y tus logros en el ranking global.</p>
+        <p class="wallet-status" data-i18n="go.connect_hint">Conecta tu wallet para guardar automáticamente este puntaje, tus logros y los r3tards que cazaste.</p>
         <div class="menu-actions">
-          <button id="btn-connect-gameover" class="btn btn-secondary">🔌 Conectar wallet</button>
+          <button id="btn-connect-gameover" class="btn btn-secondary" data-i18n="wallet.connect_btn">🔌 Conectar wallet</button>
         </div>
       </div>
 
       <div class="menu-actions">
         <button id="btn-play-again" class="btn btn-primary">🔁 Jugar de nuevo (— MON)</button>
-        <button id="btn-back-menu" class="btn btn-secondary">Menú</button>
+        <button id="btn-back-menu" class="btn btn-secondary" data-i18n="btn.back_menu">Menú</button>
       </div>
       <p class="footer-note">
-        <a href="ranking.html">🥇 Ranking global</a> · <a href="medallas.html">🎖️ Medallas</a>
+        <a href="ranking.html" data-i18n="footer.ranking">🥇 Ranking global</a> · <a href="medallas.html" data-i18n="footer.medals">🎖️ Medallas</a> · <a href="coleccion.html" data-i18n="footer.collection">📖 Colección</a>
       </p>
     </div>
   </section>
@@ -195,6 +212,10 @@
 
   <!-- ============ Código del juego ============ -->
   <script src="js/config.js"></script>
+  <!-- i18n.js va PRIMERO que todo lo demás (menos config.js, del que no
+       depende) — wallet.js/nft-loader.js/onchain-events.js/game.js/main.js
+       ya llaman a R3I18N.t()/tierLabel()/getLang() desde que se cargan. -->
+  <script src="js/i18n.js"></script>
   <script src="js/abis.js"></script>
   <script src="js/nft-loader.js"></script>
   <script src="js/audio.js"></script>

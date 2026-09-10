@@ -19,6 +19,7 @@
 const R3Loader = (() => {
   const CFG = window.R3_CONFIG;
   const ABIS = window.R3_ABIS;
+  const I18N = window.R3I18N;
 
   let provider = null;
   let rpcIndex = 0;
@@ -44,7 +45,7 @@ const R3Loader = (() => {
 
   function withTimeout(promise, ms, label) {
     return new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error(`Tiempo agotado (${label || "RPC"})`)), ms);
+      const t = setTimeout(() => reject(new Error(I18N.t("err.timeout", { label: label || "RPC" }))), ms);
       promise.then(
         (v) => { clearTimeout(t); resolve(v); },
         (e) => { clearTimeout(t); reject(e); }
@@ -137,7 +138,7 @@ const R3Loader = (() => {
         lastErr = err;
       }
     }
-    throw lastErr || new Error("No se pudo resolver " + uri);
+    throw lastErr || new Error(I18N.t("err.resolve_failed", { uri }));
   }
 
   /**
@@ -368,9 +369,7 @@ const R3Loader = (() => {
         batchResults = await multicallTokenURIs(batchIds);
       } catch (err) {
         if (i === 0) {
-          throw new Error(
-            `No se pudo conectar a ningún RPC de Monad (${describeErr(err)}). Puede ser tu red/firewall bloqueando esos dominios, o que los RPC públicos estén saturados en este momento. Revisa la consola del navegador (F12) para más detalle, o intenta de nuevo en unos minutos.`
-          );
+          throw new Error(I18N.t("err.rpc_unreachable", { detail: describeErr(err) }));
         }
         rpcFailedCount += batchIds.length;
         batchResults = batchIds.map((id) => ({ id, uri: null, exists: null }));
@@ -378,7 +377,7 @@ const R3Loader = (() => {
       for (const r of batchResults) {
         if (r.uri) uriEntries.push(r);
         else if (r.exists) {
-          throw new Error(`El token #${r.id} existe pero tokenURI() no respondió correctamente.`);
+          throw new Error(I18N.t("err.token_uri_failed", { id: r.id }));
         }
         // exists === false: token inexistente/burned, no se agrega a la
         // colección. exists === null: no se sabe (falló el RPC en este
@@ -388,19 +387,15 @@ const R3Loader = (() => {
     }
 
     if (rpcFailedCount > 0) {
-      throw new Error(
-        `No se pudieron leer ${rpcFailedCount} tokens: los RPC de Monad dejaron de responder a mitad de la carga (probablemente saturados o caídos un momento). Intenta de nuevo en unos minutos.`
-      );
+      throw new Error(I18N.t("err.rpc_dropped_mid_load", { count: rpcFailedCount }));
     }
 
     if (uriEntries.length !== totalSupply) {
-      throw new Error(`La colección está incompleta: ${uriEntries.length} tokens resueltos, totalSupply() indica ${totalSupply}.`);
+      throw new Error(I18N.t("err.collection_incomplete_uri", { resolved: uriEntries.length, total: totalSupply }));
     }
 
     if (uriEntries.length === 0) {
-      throw new Error(
-        "Se pudo hablar con la cadena pero ningún token devolvió tokenURI() válido. Revisa que NFT_CONTRACT_ADDRESS en config.js sea el correcto."
-      );
+      throw new Error(I18N.t("err.no_valid_token_uri"));
     }
 
     // ---- Fase 2: resolver metadata + imagen, con concurrencia limitada ----
@@ -430,15 +425,13 @@ const R3Loader = (() => {
     await metaPromise;
 
     if (rawItems.length === 0) {
-      throw new Error(
-        "No se pudo resolver la metadata/imágenes de r3tards (posible bloqueo de red hacia los gateways IPFS). Inténtalo de nuevo."
-      );
+      throw new Error(I18N.t("err.metadata_resolve_failed"));
     }
     if (failed.length > 0) {
-      throw new Error(`No se pudo resolver la metadata de ${failed.length} tokens activos: ${failed.join(", ")}`);
+      throw new Error(I18N.t("err.metadata_partial_failed", { count: failed.length, ids: failed.join(", ") }));
     }
     if (rawItems.length !== totalSupply) {
-      throw new Error(`La metadata está incompleta: ${rawItems.length}/${totalSupply} tokens.`);
+      throw new Error(I18N.t("err.metadata_incomplete", { resolved: rawItems.length, total: totalSupply }));
     }
 
     const withRarity = computeRarity(rawItems);

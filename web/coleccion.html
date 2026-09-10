@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Colección — R3 APOCALIPSIS</title>
+<meta name="description" content="Todos los r3tards de la colección: en color los que ya cayeron en batalla (on-chain, para siempre), en oscuro los que siguen con vida. Filtra por rareza." />
+<link rel="icon" href="assets/monad-orb.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <section class="screen active logros-screen">
+    <div class="menu-bg-fx" aria-hidden="true"></div>
+
+    <div class="menu-card logros-card">
+      <button type="button" class="btn btn-secondary btn-small lang-toggle-btn" data-lang-toggle>🌐 ES</button>
+      <h1 class="title" style="font-size: clamp(1.6rem, 6vw, 2.2rem);">📖 <span class="title-r3" data-i18n="title.collection_word1">Colección</span> <span class="title-apoc" data-i18n="title.collection_word2">R3tards</span></h1>
+      <p class="subtitle">
+        <span data-i18n="collection.subtitle_pre">Los </span><strong data-i18n="collection.subtitle_strong">1033 r3tards</strong><span data-i18n="collection.subtitle_mid"> de la colección — a </span><strong data-i18n="collection.subtitle_color">todo color</strong><span data-i18n="collection.subtitle_mid2"> los que ya cayeron en batalla (evento </span><code data-i18n="collection.subtitle_code">TokenKilled</code><span data-i18n="collection.subtitle_dark_wrap">) — en </span><strong data-i18n="collection.subtitle_dark">oscuro</strong><span data-i18n="collection.subtitle_end"> los que siguen con vida — cualquier jugador, para siempre. Es un dato global on-chain, no depende de tu wallet.</span>
+      </p>
+
+      <div class="menu-actions">
+        <a href="index.html" class="btn btn-secondary" data-i18n="nav.back_to_game">🎮 Volver al juego</a>
+        <a href="ranking.html" class="btn btn-secondary" data-i18n="nav.ranking">🥇 Ranking</a>
+        <a href="medallas.html" class="btn btn-secondary" data-i18n="nav.medals">🎖️ Medallas</a>
+        <a href="logros.html" class="btn btn-secondary" data-i18n="nav.my_kills">🏆 Mis logros</a>
+      </div>
+
+      <p id="coleccion-error" class="menu-error" hidden></p>
+      <div id="coleccion-progress" class="progress-wrap">
+        <div class="progress-label" id="coleccion-progress-label" data-i18n="collection.loading_collection">Cargando la colección…</div>
+        <div class="progress-track"><div class="progress-bar" id="coleccion-progress-bar"></div></div>
+      </div>
+    </div>
+
+    <div id="coleccion-results" class="logros-results" hidden>
+      <div class="menu-card">
+        <div class="stat-row" id="coleccion-summary"></div>
+        <div class="tier-filter" id="tier-filter"></div>
+        <p class="kill-empty" id="coleccion-empty" hidden data-i18n="collection.empty_filter">Ningún r3tard de esta rareza todavía (o el filtro no coincide con nada).</p>
+        <div class="kill-grid" id="coleccion-grid"></div>
+      </div>
+    </div>
+
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/abis.js"></script>
+  <script src="js/wallet.js"></script>
+  <script src="js/onchain-events.js"></script>
+  <script src="js/nft-loader.js"></script>
+  <script>
+    (function () {
+      const CFG = window.R3_CONFIG;
+      const I18N = window.R3I18N;
+      I18N.applyStaticTranslations();
+
+      const errorEl = document.getElementById("coleccion-error");
+      const progressWrap = document.getElementById("coleccion-progress");
+      const progressBar = document.getElementById("coleccion-progress-bar");
+      const progressLabel = document.getElementById("coleccion-progress-label");
+      const resultsEl = document.getElementById("coleccion-results");
+      const summaryEl = document.getElementById("coleccion-summary");
+      const filterEl = document.getElementById("tier-filter");
+      const gridEl = document.getElementById("coleccion-grid");
+      const emptyEl = document.getElementById("coleccion-empty");
+
+      const TIER_ORDER = ["legendary", "epic", "rare", "uncommon", "common"];
+      const TIER_COLOR = { common: "#c9c9d6", uncommon: "#7cc4ff", rare: "#5eead4", epic: "#c77dff", legendary: "#ffd166" };
+
+      let fullCollection = null; // colección completa, ordenada por rareza
+      let deadTokenIds = new Set(); // tokenIds con al menos un TokenKilled (global, on-chain)
+      let activeTier = "all";
+
+      function showError(msg) {
+        errorEl.textContent = msg;
+        errorEl.hidden = false;
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+      }
+
+      // ---- Filtro por rareza -------------------------------------------
+      function renderFilterPills() {
+        const pills = [{ key: "all", label: I18N.t("collection.filter_all"), color: null }].concat(
+          TIER_ORDER.map((key) => ({ key, label: I18N.tierLabel(key, { plural: true }), color: TIER_COLOR[key] }))
+        );
+        filterEl.innerHTML = pills
+          .map(
+            (p) => `
+            <button type="button" class="tier-filter-btn ${p.key === activeTier ? "active" : ""}" data-tier="${p.key}"
+              style="${p.color ? `--tier-color: ${p.color}` : ""}">${escapeHtml(p.label)}</button>
+          `
+          )
+          .join("");
+        filterEl.querySelectorAll(".tier-filter-btn").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            activeTier = btn.dataset.tier;
+            renderFilterPills();
+            renderGrid();
+          });
+        });
+      }
+
+      // ---- Grid principal -------------------------------------------
+      function renderSummary() {
+        const total = fullCollection.length;
+        const dead = fullCollection.filter((it) => deadTokenIds.has(it.tokenId)).length;
+        summaryEl.innerHTML = `
+          <span class="stat-pill"><span class="stat-label">${I18N.t("collection.summary_total")}</span><span class="stat-value">${total}</span></span>
+          <span class="stat-pill"><span class="stat-label">${I18N.t("collection.summary_dead")}</span><span class="stat-value">💀 ${dead}</span></span>
+          <span class="stat-pill"><span class="stat-label">${I18N.t("collection.summary_alive")}</span><span class="stat-value">🌑 ${total - dead}</span></span>
+        `;
+      }
+
+      function renderGrid() {
+        const items = activeTier === "all" ? fullCollection : fullCollection.filter((it) => it.rarityTier === activeTier);
+        if (items.length === 0) {
+          gridEl.innerHTML = "";
+          emptyEl.hidden = false;
+          return;
+        }
+        emptyEl.hidden = true;
+        gridEl.innerHTML = items
+          .map((it) => {
+            const isDead = deadTokenIds.has(it.tokenId);
+            return `
+              <div class="kill-card ${isDead ? "" : "kill-card-alive"}" style="--tier-color: ${TIER_COLOR[it.rarityTier] || TIER_COLOR.common}">
+                <div class="kill-card-img">
+                  ${it.image ? `<img src="${it.image}" alt="${escapeHtml(it.name)}" loading="lazy" />` : `<div class="kill-card-noimg">?</div>`}
+                </div>
+                <div class="kill-card-name">${escapeHtml(it.name)}${it.certifiedName ? ` <span class="kill-card-certified" title="${I18N.t("banner.certified_piece")}">★ 1/1</span>` : ""}</div>
+                <div class="kill-card-tier">${I18N.tierLabel(it.rarityTier)}</div>
+                <div class="kill-card-status ${isDead ? "kill-card-status-dead" : "kill-card-status-alive"}">${isDead ? I18N.t("collection.status_dead") : I18N.t("collection.status_alive")}</div>
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      // ---- Carga: colección completa + eventos TokenKilled ------------
+      async function loadEverything() {
+        try {
+          const collection = await R3Loader.loadCollection((loaded, total, phase) => {
+            const phasePct = total ? loaded / total : 0;
+            const overallPct = phase === "metadata" ? 25 + phasePct * 25 : phase === "uri" ? phasePct * 25 : phasePct * 50;
+            progressBar.style.width = Math.round(Math.min(50, overallPct)) + "%";
+            progressLabel.textContent = I18N.t("collection.loading_collection");
+          });
+          // Orden por rareza (legendario primero), igual que el resto del sitio.
+          fullCollection = [...collection].sort((a, b) => (a.rarityRank || 0) - (b.rarityRank || 0));
+
+          if (R3Wallet.isContractConfigured()) {
+            progressLabel.textContent = I18N.t("collection.reading_kills");
+            try {
+              const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, window.R3_ABIS.GAME, R3Events.getProvider());
+              const fromBlock = Number(CFG.GAME_CONTRACT_DEPLOY_BLOCK) || 0;
+              const toBlock = await R3Events.getLatestBlock();
+              const logs = await R3Events.queryLogsChunked(contract, "TokenKilled", fromBlock, toBlock, (done, total) => {
+                progressBar.style.width = 50 + Math.round((done / total) * 50) + "%";
+              });
+              // Cada tokenId solo puede emitir TokenKilled UNA vez en toda la
+              // vida del contrato (ver everKilledGloballyBitmap en
+              // R3Apocalipsis.sol) — el Set ya queda deduplicado por diseño,
+              // pero usamos Set de todos modos por claridad y por si acaso.
+              deadTokenIds = new Set(logs.map((log) => Number(log.args.tokenId)));
+            } catch (err) {
+              console.error(err);
+              showError((err && err.message) || I18N.t("err.collection_kills_read_failed"));
+              deadTokenIds = new Set();
+            }
+          } else {
+            showError(I18N.t("err.collection_contract_not_configured"));
+            deadTokenIds = new Set();
+          }
+
+          progressWrap.hidden = true;
+          resultsEl.hidden = false;
+          renderSummary();
+          renderFilterPills();
+          renderGrid();
+        } catch (err) {
+          console.error(err);
+          progressWrap.hidden = true;
+          showError((err && err.message) || I18N.t("err.metadata_resolve_failed"));
+        }
+      }
+
+      window.addEventListener("r3langchange", () => {
+        // Re-pinta todo (nombres de tier, etiquetas de estado) en el idioma
+        // nuevo, sin releer nada de la cadena ni de los gateways de nuevo.
+        if (fullCollection) {
+          renderSummary();
+          renderFilterPills();
+          renderGrid();
+        }
+      });
+
+      loadEverything();
+    })();
+  </script>
+</body>
+</html>

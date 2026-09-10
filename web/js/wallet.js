@@ -18,6 +18,7 @@
 const R3Wallet = (() => {
   const CFG = window.R3_CONFIG;
   const ABIS = window.R3_ABIS;
+  const I18N = window.R3I18N;
 
   let browserProvider = null;
   let signer = null;
@@ -64,10 +65,10 @@ const R3Wallet = (() => {
 
   async function connect() {
     if (!hasInjectedWallet()) {
-      throw new Error("No se detectó ninguna wallet (instala MetaMask u otra wallet compatible con Monad).");
+      throw new Error(I18N.t("err.no_wallet_detected"));
     }
     const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-    if (!accounts || accounts.length === 0) throw new Error("No se autorizó ninguna cuenta.");
+    if (!accounts || accounts.length === 0) throw new Error(I18N.t("err.no_account_authorized"));
 
     await ensureMonadNetwork();
 
@@ -89,7 +90,7 @@ const R3Wallet = (() => {
 
   async function getPlayPrice() {
     if (!isContractConfigured()) return null;
-    if (!hasInjectedWallet()) throw new Error("No se detectó ninguna wallet.");
+    if (!hasInjectedWallet()) throw new Error(I18N.t("err.no_wallet_short"));
     await ensureMonadNetwork();
     const provider = browserProvider || new ethers.BrowserProvider(window.ethereum);
     const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, provider);
@@ -98,11 +99,9 @@ const R3Wallet = (() => {
 
   async function payToPlay() {
     if (!isContractConfigured()) {
-      throw new Error(
-        "El contrato del juego todavía no está configurado. (Edita GAME_CONTRACT_ADDRESS en js/config.js después de desplegarlo.)"
-      );
+      throw new Error(I18N.t("err.contract_not_configured"));
     }
-    if (!signer) throw new Error("Conecta tu wallet primero.");
+    if (!signer) throw new Error(I18N.t("err.connect_wallet_first"));
     await ensureMonadNetwork();
 
     const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, signer);
@@ -120,19 +119,22 @@ const R3Wallet = (() => {
   }
 
   // ------------------------------------------------------------------
-  // Ranking global y logros — cada función de abajo dispara UNA
-  // transacción visible en la wallet (nunca se firma/envía nada en
-  // silencio). Se usan solo cuando el jugador aprieta un botón explícito
-  // ("Guardar en el ranking", "Guardar logros", "Guardar alias").
+  // Ranking global, logros y r3tards cazados — cada función de abajo
+  // dispara UNA transacción visible en la wallet (nunca se firma/envía
+  // nada en silencio: la wallet del jugador SIEMPRE muestra el popup de
+  // confirmación de siempre, esto no cambia eso, solo dispara ese popup
+  // automáticamente en vez de esperar a que el jugador apriete un botón
+  // aparte). setAlias() sigue siendo manual (el jugador elige cuándo
+  // ponerse un alias); recordMatch() en cambio se llama sola al terminar
+  // cada partida (ver main.js) — puntaje, logros nuevos y qué r3tards se
+  // cazaron, TODO junto en una sola transacción/firma.
   // ------------------------------------------------------------------
 
   function requireReadyContract() {
     if (!isContractConfigured()) {
-      throw new Error(
-        "El contrato del juego todavía no está configurado. (Edita GAME_CONTRACT_ADDRESS en js/config.js después de desplegarlo.)"
-      );
+      throw new Error(I18N.t("err.contract_not_configured"));
     }
-    if (!signer) throw new Error("Conecta tu wallet primero.");
+    if (!signer) throw new Error(I18N.t("err.connect_wallet_first"));
   }
 
   /** Pone/cambia el alias público on-chain (para el ranking). */
@@ -152,15 +154,6 @@ const R3Wallet = (() => {
     return await contract.playerAlias(address);
   }
 
-  /** Guarda un nuevo mejor puntaje propio (el contrato rechaza si no mejora). */
-  async function submitScore(score) {
-    requireReadyContract();
-    await ensureMonadNetwork();
-    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, signer);
-    const tx = await contract.submitScore(score);
-    return await tx.wait();
-  }
-
   /** Lee el mejor puntaje on-chain de cualquier wallet (solo lectura). */
   async function getBestScore(address) {
     if (!isContractConfigured()) return 0n;
@@ -169,22 +162,47 @@ const R3Wallet = (() => {
     return await contract.bestScore(address);
   }
 
-  /** Desbloquea uno o varios logros de una sola vez (batch, un solo tx). */
-  async function unlockAchievementsOnChain(ids) {
-    requireReadyContract();
-    if (!Array.isArray(ids) || ids.length === 0) throw new Error("No hay logros para guardar.");
-    await ensureMonadNetwork();
-    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, signer);
-    const tx = await contract.unlockAchievements(ids);
-    return await tx.wait();
-  }
-
   /** Lee el bitmask de logros on-chain de cualquier wallet (solo lectura). */
   async function getAchievementsMask(address) {
     if (!isContractConfigured()) return 0n;
     const provider = browserProvider || new ethers.BrowserProvider(window.ethereum);
     const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, provider);
     return await contract.achievementsMask(address);
+  }
+
+  /** ¿Ya murió este r3tard (tokenId) alguna vez, en manos de cualquier
+   * jugador? Lectura directa (solo lectura, gratis) del bitmap on-chain —
+   * usado por la página de colección para casos puntuales; para pintar
+   * la colección COMPLETA es más eficiente leer los eventos TokenKilled
+   * una sola vez (ver js/onchain-events.js), no token por token. */
+  async function isEverKilledGlobally(tokenId) {
+    if (!isContractConfigured()) return false;
+    const provider = browserProvider || new ethers.BrowserProvider(window.ethereum);
+    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, provider);
+    return await contract.isEverKilledGlobally(tokenId);
+  }
+
+  /**
+   * Guarda TODO el progreso de la partida que acaba de terminar, en UNA
+   * sola transacción/firma (ver recordMatch() en el contrato): el
+   * puntaje (si es récord propio), los logros nuevos, y qué r3tards se
+   * cazaron por primera vez en la historia del juego (para la página de
+   * colección). Se llama SOLA al terminar cada partida — ver main.js.
+   *
+   * `killedTokens` es un array de `{ tokenId, tierCode }` (tierCode ya
+   * numérico, 0=común..4=legendario — ver R3_CONFIG.TIER_CHAIN_CODE en
+   * config.js). Se separa aquí mismo en dos arrays paralelos porque así
+   * es como los espera el contrato (más barato en gas que un array de
+   * structs).
+   */
+  async function recordMatch(score, newAchievementIds, killedTokens) {
+    requireReadyContract();
+    await ensureMonadNetwork();
+    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, signer);
+    const killedTokenIds = (killedTokens || []).map((k) => k.tokenId);
+    const killedTiers = (killedTokens || []).map((k) => k.tierCode);
+    const tx = await contract.recordMatch(score, newAchievementIds || [], killedTokenIds, killedTiers);
+    return await tx.wait();
   }
 
   // ------------------------------------------------------------------
@@ -248,10 +266,10 @@ const R3Wallet = (() => {
     shortAddress,
     setPlayerAlias,
     getPlayerAlias,
-    submitScore,
     getBestScore,
-    unlockAchievementsOnChain,
+    recordMatch,
     getAchievementsMask,
+    isEverKilledGlobally,
     mintCard,
     hasCard,
     tokenIdOf,

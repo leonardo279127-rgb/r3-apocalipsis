@@ -16,6 +16,7 @@
  */
 const R3Events = (() => {
   const CFG = window.R3_CONFIG;
+  const I18N = window.R3I18N;
 
   const providers = [];
   let idx = 0;
@@ -42,7 +43,7 @@ const R3Events = (() => {
         rotate();
       }
     }
-    throw lastErr || new Error("No se pudo consultar el número de bloque actual en ningún RPC.");
+    throw lastErr || new Error(I18N.t("err.block_number_failed"));
   }
 
   /**
@@ -78,7 +79,7 @@ const R3Events = (() => {
         rpcFailuresInARow++;
         if (rpcFailuresInARow >= CFG.RPC_URLS.length) {
           throw new Error(
-            `No se pudieron leer los eventos ${eventName} (${(err && (err.shortMessage || err.message)) || err}).`
+            I18N.t("err.events_read_failed", { event: eventName, detail: (err && (err.shortMessage || err.message)) || err })
           );
         }
         contract = contract.connect(rotate());

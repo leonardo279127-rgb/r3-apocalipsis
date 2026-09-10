@@ -17,21 +17,23 @@
     <div class="menu-bg-fx" aria-hidden="true"></div>
 
     <div class="menu-card logros-card">
-      <h1 class="title" style="font-size: clamp(1.6rem, 6vw, 2.2rem);">🏆 <span class="title-r3">Mis</span> <span class="title-apoc">Logros</span></h1>
+      <button type="button" class="btn btn-secondary btn-small lang-toggle-btn" data-lang-toggle>🌐 ES</button>
+      <h1 class="title" style="font-size: clamp(1.6rem, 6vw, 2.2rem);">🏆 <span class="title-r3" data-i18n="title.my">Mis</span> <span class="title-apoc" data-i18n="title.achievements">Logros</span></h1>
       <p class="subtitle">
-        Conecta la misma wallet con la que jugaste para ver qué r3tards has matado.
-        Esta lista vive <strong>solo en este navegador</strong> — no es on-chain, así que
-        no la vas a ver si cambias de computadora, de navegador, o borras los datos del sitio.
+        <span data-i18n="logros.subtitle_pre">Conecta la misma wallet con la que jugaste para ver qué r3tards has matado.
+        Esta lista vive </span><strong data-i18n="logros.subtitle_strong">solo en este navegador</strong><span data-i18n="logros.subtitle_post"> — no es on-chain, así que
+        no la vas a ver si cambias de computadora, de navegador, o borras los datos del sitio.</span>
       </p>
 
       <div class="menu-actions">
-        <button id="btn-connect-logros" class="btn btn-primary">🔌 Conectar wallet</button>
-        <a href="index.html" class="btn btn-secondary">🎮 Volver al juego</a>
-        <a href="ranking.html" class="btn btn-secondary">🥇 Ranking</a>
-        <a href="medallas.html" class="btn btn-secondary">🎖️ Medallas</a>
+        <button id="btn-connect-logros" class="btn btn-primary" data-i18n="wallet.connect_btn">🔌 Conectar wallet</button>
+        <a href="index.html" class="btn btn-secondary" data-i18n="nav.back_to_game">🎮 Volver al juego</a>
+        <a href="ranking.html" class="btn btn-secondary" data-i18n="nav.ranking">🥇 Ranking</a>
+        <a href="medallas.html" class="btn btn-secondary" data-i18n="nav.medals">🎖️ Medallas</a>
+        <a href="coleccion.html" class="btn btn-secondary" data-i18n="nav.collection">📖 Colección</a>
       </div>
 
-      <p id="logros-status" class="wallet-status">No conectado</p>
+      <p id="logros-status" class="wallet-status" data-i18n="wallet.not_connected">No conectado</p>
       <p id="logros-error" class="menu-error" hidden></p>
     </div>
 
@@ -44,11 +46,15 @@
 
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
   <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
   <script src="js/abis.js"></script>
   <script src="js/wallet.js"></script>
   <script src="js/achievements.js"></script>
   <script>
     (function () {
+      const I18N = window.R3I18N;
+      I18N.applyStaticTranslations();
+
       const btnConnect = document.getElementById("btn-connect-logros");
       const statusEl = document.getElementById("logros-status");
       const errorEl = document.getElementById("logros-error");
@@ -56,7 +62,7 @@
       const summaryEl = document.getElementById("logros-summary");
       const gridEl = document.getElementById("kill-grid");
 
-      const TIER_LABELS = { common: "Común", uncommon: "Poco común", rare: "Raro", epic: "Épico", legendary: "Legendario" };
+      let lastAddress = null; // se recuerda para poder re-pintar al cambiar de idioma
 
       function showError(msg) {
         errorEl.textContent = msg;
@@ -64,11 +70,12 @@
       }
 
       function render(address) {
+        lastAddress = address;
         const kills = R3Achievements.getKills(address);
         resultsEl.hidden = false;
 
         if (kills.length === 0) {
-          summaryEl.innerHTML = `<p class="kill-empty">Todavía no has matado ningún r3tard con esta wallet en este navegador. ¡Ve a jugar!</p>`;
+          summaryEl.innerHTML = `<p class="kill-empty">${I18N.t("logros.empty")}</p>`;
           gridEl.innerHTML = "";
           return;
         }
@@ -77,13 +84,13 @@
         const byTier = {};
         kills.forEach((k) => { byTier[k.tierKey] = (byTier[k.tierKey] || 0) + k.timesKilled; });
         const tierPills = Object.entries(byTier)
-          .map(([tier, count]) => `<span class="stat-pill"><span class="stat-label">${TIER_LABELS[tier] || tier}</span><span class="stat-value">${count}</span></span>`)
+          .map(([tier, count]) => `<span class="stat-pill"><span class="stat-label">${I18N.tierLabel(tier)}</span><span class="stat-value">${count}</span></span>`)
           .join("");
 
         summaryEl.innerHTML = `
           <div class="stat-row">
-            <span class="stat-pill"><span class="stat-label">r3tards distintos</span><span class="stat-value">${kills.length}</span></span>
-            <span class="stat-pill"><span class="stat-label">Kills totales</span><span class="stat-value">${totalKills}</span></span>
+            <span class="stat-pill"><span class="stat-label">${I18N.t("stat.distinct_r3tards")}</span><span class="stat-value">${kills.length}</span></span>
+            <span class="stat-pill"><span class="stat-label">${I18N.t("stat.total_kills")}</span><span class="stat-value">${totalKills}</span></span>
             ${tierPills}
           </div>
         `;
@@ -94,8 +101,8 @@
               <div class="kill-card-img">
                 ${k.image ? `<img src="${k.image}" alt="${escapeHtml(k.name)}" loading="lazy" />` : `<div class="kill-card-noimg">?</div>`}
               </div>
-              <div class="kill-card-name">${escapeHtml(k.name)}${k.isCertified ? ' <span class="kill-card-certified" title="Pieza 1/1 · Certified">★ 1/1</span>' : ""}</div>
-              <div class="kill-card-tier">${TIER_LABELS[k.tierKey] || k.tierKey}</div>
+              <div class="kill-card-name">${escapeHtml(k.name)}${k.isCertified ? ` <span class="kill-card-certified" title="${I18N.t("banner.certified_piece")}">★ 1/1</span>` : ""}</div>
+              <div class="kill-card-tier">${I18N.tierLabel(k.tierKey)}</div>
               <div class="kill-card-count">×${k.timesKilled}</div>
             </div>
           `)
@@ -116,14 +123,20 @@
         btnConnect.disabled = true;
         try {
           const addr = await R3Wallet.connect();
-          statusEl.textContent = `Conectado: ${R3Wallet.shortAddress(addr)}`;
+          statusEl.textContent = I18N.t("wallet.connected", { addr: R3Wallet.shortAddress(addr) });
           render(addr);
         } catch (err) {
           console.error(err);
-          showError((err && err.message) || "No se pudo conectar la wallet.");
+          showError((err && err.message) || I18N.t("err.wallet_connect_failed"));
         } finally {
           btnConnect.disabled = false;
         }
+      });
+
+      window.addEventListener("r3langchange", () => {
+        // Re-pinta el grid de kills (nombres de tier, textos) en el idioma
+        // nuevo sin tener que releer nada de localStorage de nuevo.
+        if (lastAddress) render(lastAddress);
       });
     })();
   </script>

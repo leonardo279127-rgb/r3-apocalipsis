@@ -6,6 +6,12 @@
  */
 (async function () {
   const CFG = window.R3_CONFIG;
+  const I18N = window.R3I18N;
+
+  // Aplica ya mismo las traducciones estáticas marcadas en el HTML con
+  // data-i18n/data-i18n-attr (ver js/i18n.js) — se vuelve a llamar cada
+  // vez que el jugador cambia de idioma a mano desde R3I18N.setLang().
+  I18N.applyStaticTranslations();
 
   const el = (id) => document.getElementById(id);
   const screens = {
@@ -38,8 +44,7 @@
   const goAchievementsList = el("go-achievements-list");
   const goOnchain = el("go-onchain");
   const goOnchainStatus = el("go-onchain-status");
-  const btnSaveScore = el("btn-save-score");
-  const btnSaveAchievements = el("btn-save-achievements");
+  const btnRetrySave = el("btn-retry-save");
   const goConnectHint = el("go-connect-hint");
   const btnConnectGameover = el("btn-connect-gameover");
 
@@ -90,9 +95,7 @@
   // navegador. Sin este aviso, se ve exactamente como "no cargan los
   // precargados ni los fondos", sin ninguna pista de por qué.
   if (window.location.protocol === "file:") {
-    showMenuError(
-      "⚠️ Estás abriendo este archivo directamente desde tu computadora (protocolo file://). Así el navegador bloquea la carga de la colección y de los fondos — no es un error del juego. Pruébalo siempre desde el link real de GitHub Pages (o un servidor local), nunca abriendo index.html con doble clic."
-    );
+    showMenuError(I18N.t("err.file_protocol_initial"));
   }
 
   function showScreen(name) {
@@ -121,20 +124,20 @@
   // y vuelve a exigir conectar wallet + pagar.
   const testMode = !R3Wallet.isContractConfigured();
 
-  let priceText = "Precio actual";
+  let priceText = I18N.t("price.current_default");
   if (!testMode) {
     try {
       const priceWei = await R3Wallet.getPlayPrice();
       // Si el owner puso el precio en 0 (juego gratis, solo gas), se
       // muestra "Gratis" en vez del feo "0.0 MON".
-      priceText = priceWei === 0n ? "Gratis" : `${ethers.formatEther(priceWei)} MON`;
+      priceText = priceWei === 0n ? I18N.t("price.free") : `${ethers.formatEther(priceWei)} MON`;
     } catch (err) {
       console.warn("No se pudo leer playPrice() todavía:", err);
     }
   }
-  priceDisplay.textContent = testMode ? "Modo prueba" : priceText;
-  btnPlay.textContent = testMode ? "🧪 Probar gratis (colección real)" : `🎮 Jugar (${priceText})`;
-  btnPlayAgain.textContent = testMode ? "🧪 Probar de nuevo" : `🔁 Jugar de nuevo (${priceText})`;
+  priceDisplay.textContent = testMode ? I18N.t("price.test_mode") : priceText;
+  btnPlay.textContent = testMode ? I18N.t("btn.play_test") : I18N.t("btn.play_priced", { price: priceText });
+  btnPlayAgain.textContent = testMode ? I18N.t("btn.play_again_test") : I18N.t("btn.play_again_priced", { price: priceText });
   btnPlay.disabled = false;
 
   // Aclaración explícita del costo real — pedido explícito: "decir que
@@ -143,19 +146,17 @@
   // lo explica en criollo para que no quede duda de qué es cada cosa.
   const feeNote = el("fee-note");
   if (testMode) {
-    feeNote.textContent = "🧪 Modo prueba: no hay wallet ni cobro de ningún tipo todavía.";
-  } else if (priceText === "Gratis") {
-    feeNote.innerHTML = "El juego en sí es <strong>gratis</strong> — no cobramos nada. Lo único que pagas es el gas normal de la red Monad (la comisión de la propia blockchain por procesar tu transacción), no un cobro nuestro.";
+    feeNote.textContent = I18N.t("feenote.test_mode");
+  } else if (priceText === I18N.t("price.free")) {
+    feeNote.innerHTML = I18N.t("feenote.free");
   } else {
-    feeNote.innerHTML = `Pagas <strong>${priceText}</strong> por partida (va directo al contrato, verificable on-chain) más el gas normal de la red Monad — nada oculto, nada de suscripciones.`;
+    feeNote.innerHTML = I18N.t("feenote.priced", { price: priceText });
   }
 
   if (testMode) {
     btnConnect.hidden = true;
-    walletStatus.textContent = "Modo prueba: colección real de r3tards, sin wallet ni pago.";
-    showMenuError(
-      "🧪 Estás en modo prueba: GAME_CONTRACT_ADDRESS todavía es el placeholder en js/config.js, así que \"Probar gratis\" carga la colección REAL de r3tards pero no cobra nada. Despliega tu contrato y pega su dirección ahí para activar el cobro real."
-    );
+    walletStatus.textContent = I18N.t("wallet.test_mode_status");
+    showMenuError(I18N.t("err.test_mode_warning"));
   }
 
   // ---------------------------------------------------------------
@@ -176,7 +177,7 @@
       console.warn("No se pudo leer el alias on-chain:", err);
       currentAlias = "";
     }
-    aliasCurrent.textContent = currentAlias ? `Alias actual: "${currentAlias}"` : "Todavía no tienes alias";
+    aliasCurrent.textContent = currentAlias ? I18N.t("alias.current", { alias: currentAlias }) : I18N.t("alias.none_yet_dynamic");
     aliasInput.value = currentAlias;
     await refreshCardUI(addr);
   }
@@ -189,7 +190,7 @@
     cardRow.hidden = false;
     try {
       const owns = await R3Wallet.hasCard(addr);
-      cardStatus.textContent = owns ? "🪪 Ya tienes tu tarjeta de jugador (NFT)" : "Todavía no tienes tu tarjeta";
+      cardStatus.textContent = owns ? I18N.t("card.has") : I18N.t("card.none_yet");
       btnMintCard.hidden = owns;
     } catch (err) {
       console.warn("No se pudo leer hasCard() on-chain:", err);
@@ -197,10 +198,10 @@
   }
 
   /** Muestra un aviso especial la primera vez que un tx mintea la tarjeta
-   * (llamado tras setAlias/submitScore/unlockAchievements/mintCard). */
+   * (llamado tras setAlias/recordMatch/mintCard). */
   function announceCardIfMinted(receipt) {
     if (R3Wallet.wasCardMinted(receipt)) {
-      toast("🪪 ¡Conseguiste tu Tarjeta de Jugador (NFT)! Se actualiza sola con tu progreso — no se puede vender ni transferir.", 5200);
+      toast(I18N.t("toast.card_minted"), 5200);
       const addr = R3Wallet.getAddress();
       if (addr) refreshCardUI(addr);
     }
@@ -210,18 +211,18 @@
     R3Audio.uiClick();
     const addr = R3Wallet.getAddress();
     if (!addr) {
-      showMenuError("Conecta tu wallet primero.");
+      showMenuError(I18N.t("err.connect_wallet_first"));
       return;
     }
     btnMintCard.disabled = true;
-    toast("Confirma la transacción en tu wallet…", 6000);
+    toast(I18N.t("toast.confirm_tx"), 6000);
     try {
       const receipt = await R3Wallet.mintCard();
       announceCardIfMinted(receipt);
       await refreshCardUI(addr);
     } catch (err) {
       console.error(err);
-      const msg = /user rejected|denied/i.test(err.message || "") ? "Cancelaste la transacción." : err.message || "No se pudo mintear la tarjeta.";
+      const msg = /user rejected|denied/i.test(err.message || "") ? I18N.t("err.tx_cancelled") : err.message || I18N.t("err.mint_card_failed");
       showMenuError(msg);
     } finally {
       btnMintCard.disabled = false;
@@ -232,25 +233,25 @@
     R3Audio.uiClick();
     const value = aliasInput.value.trim();
     if (!value) {
-      showMenuError("Escribe un alias antes de guardarlo.");
+      showMenuError(I18N.t("err.alias_empty"));
       return;
     }
     const addr = R3Wallet.getAddress();
     if (!addr) {
-      showMenuError("Conecta tu wallet primero.");
+      showMenuError(I18N.t("err.connect_wallet_first"));
       return;
     }
     btnSaveAlias.disabled = true;
-    toast("Confirma la transacción en tu wallet…", 6000);
+    toast(I18N.t("toast.confirm_tx"), 6000);
     try {
       const receipt = await R3Wallet.setPlayerAlias(value);
       currentAlias = value;
-      aliasCurrent.textContent = `Alias actual: "${value}"`;
-      toast("¡Alias guardado! Ya aparece así en el ranking.", 2600);
+      aliasCurrent.textContent = I18N.t("alias.current", { alias: value });
+      toast(I18N.t("toast.alias_saved"), 2600);
       announceCardIfMinted(receipt);
     } catch (err) {
       console.error(err);
-      const msg = /user rejected|denied/i.test(err.message || "") ? "Cancelaste la transacción." : err.message || "No se pudo guardar el alias.";
+      const msg = /user rejected|denied/i.test(err.message || "") ? I18N.t("err.tx_cancelled") : err.message || I18N.t("err.alias_save_failed");
       showMenuError(msg);
     } finally {
       btnSaveAlias.disabled = false;
@@ -289,13 +290,31 @@
     goAchievementsList.innerHTML = earnedIds
       .map((id) => {
         const def = R3AchievementDefs.byId(id);
-        return def ? `<li title="${def.desc}">🎖️ ${def.name}</li>` : "";
+        if (!def) return "";
+        const name = R3AchievementDefs.name(def);
+        const desc = R3AchievementDefs.desc(def);
+        return `<li title="${desc}">🎖️ ${name}</li>`;
       })
       .join("");
   }
 
-  /** Actualiza la sección "guardar en el ranking / guardar logros" del game over. */
-  async function updateGameOverOnchainSection() {
+  // ---------------------------------------------------------------
+  // Guardado on-chain AUTOMÁTICO al terminar la partida — puntaje, logros
+  // nuevos y qué r3tards se cazaron, TODO junto en una sola transacción
+  // (recordMatch(), ver wallet.js/contracts/R3Apocalipsis.sol). Antes
+  // esto requería apretar dos botones aparte; ahora se dispara solo, apenas
+  // se llega al game over (si ya hay wallet conectada) o justo después de
+  // conectar desde esta misma pantalla. Si el guardado automático falla
+  // (la wallet lo rechaza, no hay gas, se cae la red…) se deja un botón de
+  // "Reintentar" a la vista — el jugador nunca se queda sin forma de
+  // guardar su progreso solo porque la wallet le mostró el popup en mal
+  // momento.
+  // ---------------------------------------------------------------
+  let autoSaveInFlight = false;
+
+  /** Decide qué mostrar/hacer en la sección on-chain del game over, y
+   * dispara el guardado automático si corresponde. */
+  async function autoSaveProgress() {
     const addr = R3Wallet.getAddress && R3Wallet.getAddress();
     if (testMode) {
       goOnchain.hidden = true;
@@ -309,75 +328,91 @@
     }
     goConnectHint.hidden = true;
     goOnchain.hidden = false;
-    goOnchainStatus.textContent = "";
+    btnRetrySave.hidden = true;
 
     const earnedIds = lastGameOverSummary ? computeEarnedAchievementIds(lastGameOverSummary, addr) : [];
     renderGameOverAchievements(earnedIds);
 
     const mask = await ensureAchievementsMask(addr);
     lastNewAchievementIds = earnedIds.filter((id) => (mask & (1n << BigInt(id))) === 0n);
-    btnSaveAchievements.textContent = lastNewAchievementIds.length
-      ? `🎖️ Guardar logros nuevos (${lastNewAchievementIds.length})`
-      : "🎖️ Guardar logros nuevos";
-    btnSaveAchievements.disabled = lastNewAchievementIds.length === 0;
+
+    const score = lastGameOverSummary ? lastGameOverSummary.score : 0;
+    const killedTokens = ((lastGameOverSummary && lastGameOverSummary.killedTokens) || []).map((k) => ({
+      tokenId: k.tokenId,
+      tierCode: CFG.TIER_CHAIN_CODE[k.tierKey] ?? 0,
+    }));
+
+    // Nada que intentar guardar (por ejemplo, una muerte instantánea sin
+    // puntos ni r3tards cazados): no molestamos con un popup de wallet
+    // para nada, dejamos el estado limpio y listo.
+    if (score <= 0 && lastNewAchievementIds.length === 0 && killedTokens.length === 0) {
+      goOnchainStatus.textContent = I18N.t("toast.nothing_to_save");
+      return;
+    }
+
+    await attemptSave(score, lastNewAchievementIds, killedTokens);
   }
+
+  /** Dispara la transacción recordMatch() de verdad (llamada sola al
+   * terminar la partida, y de nuevo si el jugador aprieta "Reintentar"). */
+  async function attemptSave(score, newAchievementIds, killedTokens) {
+    if (autoSaveInFlight) return;
+    autoSaveInFlight = true;
+    btnRetrySave.hidden = true;
+    btnRetrySave.disabled = true;
+    goOnchainStatus.textContent = I18N.t("toast.autosaving");
+    try {
+      const receipt = await R3Wallet.recordMatch(score, newAchievementIds, killedTokens);
+      achievementsMaskCache = null; // se relee fresco la próxima vez que haga falta
+      lastNewAchievementIds = [];
+      goOnchainStatus.textContent = I18N.t("toast.progress_saved");
+      announceCardIfMinted(receipt);
+    } catch (err) {
+      console.error(err);
+      const msg = /user rejected|denied/i.test(err.message || "")
+        ? I18N.t("err.tx_cancelled")
+        : /nada nuevo/i.test(err.message || "")
+        ? I18N.t("toast.nothing_to_save")
+        : err.message || I18N.t("err.progress_save_failed");
+      goOnchainStatus.textContent = msg;
+      // "Nada nuevo que guardar" no es un error de verdad (puede pasar si
+      // jugaste de nuevo con un puntaje peor y ya habías cazado todos esos
+      // mismos r3tards antes) — en ESE caso puntual no tiene sentido
+      // ofrecer "reintentar" (volvería a pasar lo mismo).
+      if (!/nada nuevo/i.test(err.message || "")) {
+        btnRetrySave.hidden = false;
+      }
+    } finally {
+      autoSaveInFlight = false;
+      btnRetrySave.disabled = false;
+    }
+  }
+
+  btnRetrySave.addEventListener("click", () => {
+    R3Audio.uiClick();
+    if (!lastGameOverSummary) return;
+    const addr = R3Wallet.getAddress && R3Wallet.getAddress();
+    if (!addr) return;
+    const killedTokens = ((lastGameOverSummary.killedTokens) || []).map((k) => ({
+      tokenId: k.tokenId,
+      tierCode: CFG.TIER_CHAIN_CODE[k.tierKey] ?? 0,
+    }));
+    attemptSave(lastGameOverSummary.score, lastNewAchievementIds, killedTokens);
+  });
 
   btnConnectGameover.addEventListener("click", async () => {
     R3Audio.uiClick();
     btnConnectGameover.disabled = true;
     try {
       const addr = await R3Wallet.connect();
-      walletStatus.textContent = `Conectado: ${R3Wallet.shortAddress(addr)}`;
+      walletStatus.textContent = I18N.t("wallet.connected", { addr: R3Wallet.shortAddress(addr) });
       achievementsMaskCache = null;
-      await Promise.all([refreshAliasUI(addr), updateGameOverOnchainSection()]);
+      await Promise.all([refreshAliasUI(addr), autoSaveProgress()]);
     } catch (err) {
       console.error(err);
-      goOnchainStatus.textContent = err.message || "No se pudo conectar la wallet.";
+      goOnchainStatus.textContent = err.message || I18N.t("err.wallet_connect_failed");
     } finally {
       btnConnectGameover.disabled = false;
-    }
-  });
-
-  btnSaveScore.addEventListener("click", async () => {
-    R3Audio.uiClick();
-    if (!lastGameOverSummary) return;
-    btnSaveScore.disabled = true;
-    goOnchainStatus.textContent = "Confirma la transacción en tu wallet…";
-    try {
-      const receipt = await R3Wallet.submitScore(lastGameOverSummary.score);
-      goOnchainStatus.textContent = "¡Puntaje guardado en el ranking global!";
-      announceCardIfMinted(receipt);
-    } catch (err) {
-      console.error(err);
-      const msg = /user rejected|denied/i.test(err.message || "")
-        ? "Cancelaste la transacción."
-        : /no supera/i.test(err.message || "")
-        ? "Este puntaje no supera tu mejor récord guardado — no hace falta guardarlo de nuevo."
-        : err.message || "No se pudo guardar el puntaje.";
-      goOnchainStatus.textContent = msg;
-    } finally {
-      btnSaveScore.disabled = false;
-    }
-  });
-
-  btnSaveAchievements.addEventListener("click", async () => {
-    R3Audio.uiClick();
-    if (lastNewAchievementIds.length === 0) return;
-    btnSaveAchievements.disabled = true;
-    goOnchainStatus.textContent = "Confirma la transacción en tu wallet…";
-    try {
-      const receipt = await R3Wallet.unlockAchievementsOnChain(lastNewAchievementIds);
-      achievementsMaskCache = null; // se relee fresco la próxima vez
-      goOnchainStatus.textContent = `¡${lastNewAchievementIds.length} logro(s) guardado(s)! Ya se ven en tus medallas.`;
-      lastNewAchievementIds = [];
-      btnSaveAchievements.textContent = "🎖️ Guardar logros nuevos";
-      btnSaveAchievements.disabled = true;
-      announceCardIfMinted(receipt);
-    } catch (err) {
-      console.error(err);
-      const msg = /user rejected|denied/i.test(err.message || "") ? "Cancelaste la transacción." : err.message || "No se pudieron guardar los logros.";
-      goOnchainStatus.textContent = msg;
-      btnSaveAchievements.disabled = false;
     }
   });
 
@@ -409,8 +444,8 @@
         const overallPct =
           phase === "metadata" ? 50 + phasePct * 50 : phase === "uri" ? phasePct * 50 : phasePct * 100;
         progressBar.style.width = Math.round(Math.min(100, overallPct)) + "%";
-        const label = phase === "metadata" ? "Resolviendo imágenes y nombres" : phase === "uri" ? "Leyendo la colección on-chain" : "Cargando colección r3tards";
-        progressLabel.textContent = `${label}… ${loaded}/${total}`;
+        const label = phase === "metadata" ? I18N.t("progress.resolving_images") : phase === "uri" ? I18N.t("progress.reading_chain") : I18N.t("progress.loading_collection");
+        progressLabel.textContent = I18N.t("progress.line", { label, loaded, total });
       });
       // Adelanta la descarga de las ~1033 imágenes en dos etapas, para no
       // tener que elegir entre "esperar todo" (lento) y "no esperar nada"
@@ -429,12 +464,12 @@
       //      navegador mismo se encarga de darles paso a las urgentes
       //      primero cuando compiten por la misma conexión.
       if (R3Game && typeof R3Game.prefetchImages === "function") {
-        progressLabel.textContent = `Colección lista. Precargando imágenes… 0/${loadedCollection.length}`;
+        progressLabel.textContent = I18N.t("progress.prefetch_start", { total: loadedCollection.length });
         progressBar.style.width = "0%";
         const QUICK_START_MS = 3500;
         const prefetchPromise = R3Game.prefetchImages(loadedCollection, (done, total) => {
           progressBar.style.width = Math.round((done / total) * 100) + "%";
-          progressLabel.textContent = `Precargando imágenes… ${done}/${total}`;
+          progressLabel.textContent = I18N.t("progress.prefetching", { done, total });
         });
         // No hace falta un botón para "saltar" la espera: como el tope ya
         // es corto y fijo (unos segundos), simplemente se deja pasar ese
@@ -446,22 +481,20 @@
       // segundo plano) se marca la colección como lista de verdad para
       // que "Jugar" pueda usarla.
       collection = loadedCollection;
-      progressLabel.textContent = `Colección lista: ${collection.length} r3tards cargados ✅`;
+      progressLabel.textContent = I18N.t("progress.ready", { count: collection.length });
       progressBar.style.width = "100%";
       setTimeout(() => (progressWrap.hidden = true), 1400);
       return collection;
     } catch (err) {
       console.error(err);
-      progressLabel.textContent = "No se pudo cargar la colección.";
+      progressLabel.textContent = I18N.t("progress.load_failed_label");
       // Si estamos en file://, el error real (típicamente algo de RPC/red)
       // es solo un síntoma confuso — mostramos la explicación clara en vez
       // de dejar que el mensaje genérico de más abajo la tape.
       if (window.location.protocol === "file:") {
-        showMenuError(
-          "⚠️ Estás abriendo este archivo directamente desde tu computadora (protocolo file://). Bajo file:// el navegador bloquea la carga rápida de la colección Y no siempre puede completar el respaldo on-chain tampoco. Esto NO es un error del juego — pruébalo desde el link real de GitHub Pages (o un servidor local), nunca abriendo index.html con doble clic."
-        );
+        showMenuError(I18N.t("err.file_protocol_catch"));
       } else {
-        showMenuError((err && err.message) || "No se pudo leer la colección r3tards. Revisa tu conexión e intenta de nuevo.");
+        showMenuError((err && err.message) || I18N.t("err.collection_read_failed_fallback"));
       }
       btnRetry.hidden = false;
       return null;
@@ -520,12 +553,12 @@
     btnConnect.disabled = true;
     try {
       const addr = await R3Wallet.connect();
-      walletStatus.textContent = `Conectado: ${R3Wallet.shortAddress(addr)}`;
+      walletStatus.textContent = I18N.t("wallet.connected", { addr: R3Wallet.shortAddress(addr) });
       achievementsMaskCache = null;
       await refreshAliasUI(addr);
     } catch (err) {
       console.error(err);
-      showMenuError(err.message || "No se pudo conectar la wallet.");
+      showMenuError(err.message || I18N.t("err.wallet_connect_failed"));
     } finally {
       btnConnect.disabled = false;
     }
@@ -542,35 +575,35 @@
 
     const coll = await ensureCollectionLoaded();
     if (!coll) {
-      showMenuError("Espera a que cargue la colección antes de jugar.");
+      showMenuError(I18N.t("err.wait_for_collection"));
       return;
     }
 
     if (testMode) {
-      toast("Modo prueba: sin pago, colección real de r3tards.", 2000);
+      toast(I18N.t("toast.test_mode_play"), 2000);
       showScreen("game");
       R3Game.start(coll);
       return;
     }
 
     if (!R3Wallet.getAddress()) {
-      showMenuError("Conecta tu wallet primero.");
+      showMenuError(I18N.t("err.connect_wallet_first"));
       return;
     }
 
     triggerBtn.disabled = true;
-    toast("Confirma el pago en tu wallet…", 6000);
+    toast(I18N.t("toast.confirm_payment"), 6000);
     try {
       await R3Wallet.payToPlay();
       R3Audio.coinPay();
-      toast("¡Pago confirmado! Que empiece el apocalipsis.", 2200);
+      toast(I18N.t("toast.payment_confirmed"), 2200);
       showScreen("game");
       R3Game.start(coll);
     } catch (err) {
       console.error(err);
       const msg = /user rejected|denied/i.test(err.message || "")
-        ? "Cancelaste la transacción."
-        : err.message || "No se pudo procesar el pago.";
+        ? I18N.t("err.tx_cancelled")
+        : err.message || I18N.t("err.payment_failed");
       showMenuError(msg);
     } finally {
       triggerBtn.disabled = false;
@@ -592,7 +625,7 @@
   const btnMuteMusic = el("btn-mute-music");
   function refreshMuteBtn() {
     const muted = R3Audio.isMusicMuted();
-    btnMuteMusic.textContent = muted ? "🔇 Música" : "🔊 Música";
+    btnMuteMusic.textContent = muted ? I18N.t("hud.mute_off") : I18N.t("hud.mute_on");
     btnMuteMusic.classList.toggle("muted", muted);
   }
   refreshMuteBtn();
@@ -606,7 +639,7 @@
   // ---------------------------------------------------------------
   R3Game.init(el("game-canvas"), {
     onScoreChange: (score) => {
-      hudScore.textContent = score.toLocaleString("es");
+      hudScore.textContent = I18N.formatScore(score);
     },
     onLivesChange: (lives) => {
       // Cada vida es el logo de Monad (web/assets/monad-logo.png) — las
@@ -623,10 +656,10 @@
           html +=
             `<span class="life-icon-wrap">` +
             `<img class="life-icon life-icon-lost" src="assets/monad-logo.png" alt="" />` +
-            `<img class="life-icon life-icon-half-fill" src="assets/monad-logo.png" alt="media vida" />` +
+            `<img class="life-icon life-icon-half-fill" src="assets/monad-logo.png" alt="${I18N.t("alt.half_life")}" />` +
             `</span>`;
         } else {
-          html += `<img class="life-icon${filled ? "" : " life-icon-lost"}" src="assets/monad-logo.png" alt="vida" />`;
+          html += `<img class="life-icon${filled ? "" : " life-icon-lost"}" src="assets/monad-logo.png" alt="${I18N.t("alt.life")}" />`;
         }
       }
       hudLives.innerHTML = html;
@@ -658,7 +691,7 @@
       // Además del banner (que se ve 2s y desaparece), el HUD deja el
       // nombre y el ícono del arma puestos todo el tiempo — así el
       // jugador siempre sabe qué trae equipado sin tener que recordarlo.
-      hudWeaponName.textContent = meta.label;
+      hudWeaponName.textContent = meta.label[I18N.getLang()] || meta.label.es;
       const existingIcon = hudWeaponEl.querySelector(".hud-weapon-icon");
       if (existingIcon) existingIcon.remove();
       const icon = document.createElement("img");
@@ -675,7 +708,7 @@
         killLog.innerHTML = ""; // partida nueva: log limpio
         // Reset del indicador de arma: cada partida arranca sin arma
         // (a puños) hasta el primer épico/legendario muerto.
-        hudWeaponName.textContent = "puños";
+        hudWeaponName.textContent = I18N.t("weapon.fists");
         const existingIcon = hudWeaponEl.querySelector(".hud-weapon-icon");
         if (existingIcon) existingIcon.remove();
       }
@@ -690,23 +723,22 @@
       appendKillLog(info);
     },
     onGameOver: (summary) => {
-      goTitle.textContent = summary.victory ? "¡COLECCIÓN COMPLETA!" : "FIN DEL APOCALIPSIS";
+      goTitle.textContent = summary.victory ? I18N.t("go.title_victory") : I18N.t("go.title_defeat");
       goTitle.classList.toggle("gameover-title-victory", !!summary.victory);
       goVictoryNote.hidden = !summary.victory;
-      goScore.textContent = summary.score.toLocaleString("es");
+      goScore.textContent = I18N.formatScore(summary.score);
       goCombo.textContent = summary.bestCombo;
       goWave.textContent = summary.wave;
       goProgress.textContent = lastProgressText;
       goBreakdown.innerHTML = "";
-      const labels = { common: "Comunes", uncommon: "Poco comunes", rare: "Raros", epic: "Épicos", legendary: "Legendarios" };
       Object.entries(summary.killsByTier).forEach(([tier, count]) => {
         if (!count) return;
         const li = document.createElement("li");
-        li.textContent = `${labels[tier] || tier}: ${count}`;
+        li.textContent = `${I18N.tierLabel(tier, { plural: true })}: ${count}`;
         goBreakdown.appendChild(li);
       });
       lastGameOverSummary = summary;
-      updateGameOverOnchainSection();
+      autoSaveProgress();
       showScreen("gameover");
     },
   });
@@ -749,9 +781,9 @@
     // propio en vez del genérico "¡LEGENDARIO DETECTADO!", para que se
     // sienta el momento especial de que salió justo esa pieza.
     const verb = info.tierKey === "legendary"
-      ? (info.isCertified ? `¡LEGENDARIO "${info.name.toUpperCase()}"!` : "¡LEGENDARIO DETECTADO!")
-      : info.tierKey === "epic" ? "¡ÉPICO A LA VISTA!" : "¡RARO CAYENDO!";
-    const sub = info.isCertified ? "Pieza 1/1 · Certified" : `r3tards #${info.tokenId}`;
+      ? (info.isCertified ? I18N.t("banner.legendary_named", { name: info.name.toUpperCase() }) : I18N.t("banner.legendary_detected"))
+      : info.tierKey === "epic" ? I18N.t("banner.epic_sighted") : I18N.t("banner.rare_falling");
+    const sub = info.isCertified ? I18N.t("banner.certified_piece") : I18N.t("banner.token_id", { id: info.tokenId });
     b.innerHTML = `${verb}<br><span style="font-size:0.6em">${sub}</span>`;
     bannerLayer.appendChild(b);
     setTimeout(() => b.remove(), 2300);
@@ -765,7 +797,7 @@
     const b = document.createElement("div");
     b.className = "rare-banner";
     b.style.color = "#ffd166";
-    b.innerHTML = `¡DAÑO x${mult} DESBLOQUEADO!<br><span style="font-size:0.6em">Tus disparos ahora hacen ${mult}x de daño</span>`;
+    b.innerHTML = `${I18N.t("banner.damage_title", { mult })}<br><span style="font-size:0.6em">${I18N.t("banner.damage_sub", { mult })}</span>`;
     bannerLayer.appendChild(b);
     setTimeout(() => b.remove(), 2300);
   }
@@ -777,7 +809,8 @@
     const b = document.createElement("div");
     b.className = "rare-banner";
     b.style.color = "#8f7bff";
-    b.innerHTML = `¡NUEVA ARMA: ${meta.label.toUpperCase()}!<br><span style="font-size:0.6em">Ráfaga x${meta.burst} — ${meta.burst} logos de Monad por disparo</span>`;
+    const weaponLabel = ((meta.label[I18N.getLang()] || meta.label.es) || "").toLocaleUpperCase();
+    b.innerHTML = `${I18N.t("banner.weapon_title", { label: weaponLabel })}<br><span style="font-size:0.6em">${I18N.t("banner.weapon_sub", { burst: meta.burst })}</span>`;
     bannerLayer.appendChild(b);
     setTimeout(() => b.remove(), 2300);
   }

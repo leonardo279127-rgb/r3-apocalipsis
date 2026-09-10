@@ -17,23 +17,25 @@
     <div class="menu-bg-fx" aria-hidden="true"></div>
 
     <div class="menu-card logros-card">
-      <h1 class="title" style="font-size: clamp(1.6rem, 6vw, 2.2rem);">🥇 <span class="title-r3">Ranking</span> <span class="title-apoc">Global</span></h1>
+      <button type="button" class="btn btn-secondary btn-small lang-toggle-btn" data-lang-toggle>🌐 ES</button>
+      <h1 class="title" style="font-size: clamp(1.6rem, 6vw, 2.2rem);">🥇 <span class="title-r3" data-i18n="title.ranking_word1">Ranking</span> <span class="title-apoc" data-i18n="title.ranking_word2">Global</span></h1>
       <p class="subtitle">
-        Los mejores puntajes de <strong>todos los jugadores</strong>, leídos directo de la
-        cadena (evento <code>ScoreSubmitted</code> del contrato) — cualquiera que abra este
-        link ve el mismo ranking, no depende de este navegador ni de este dispositivo.
+        <span data-i18n="ranking.subtitle_pre">Los mejores puntajes de </span><strong data-i18n="ranking.subtitle_strong">todos los jugadores</strong><span data-i18n="ranking.subtitle_mid">, leídos directo de la
+        cadena (evento </span><code data-i18n="ranking.subtitle_code">ScoreSubmitted</code><span data-i18n="ranking.subtitle_post"> del contrato) — cualquiera que abra este
+        link ve el mismo ranking, no depende de este navegador ni de este dispositivo.</span>
       </p>
 
       <div class="menu-actions">
-        <button id="btn-connect-ranking" class="btn btn-primary">🔌 Conectar wallet</button>
-        <a href="index.html" class="btn btn-secondary">🎮 Volver al juego</a>
-        <a href="medallas.html" class="btn btn-secondary">🎖️ Medallas</a>
+        <button id="btn-connect-ranking" class="btn btn-primary" data-i18n="wallet.connect_btn">🔌 Conectar wallet</button>
+        <a href="index.html" class="btn btn-secondary" data-i18n="nav.back_to_game">🎮 Volver al juego</a>
+        <a href="medallas.html" class="btn btn-secondary" data-i18n="nav.medals">🎖️ Medallas</a>
+        <a href="coleccion.html" class="btn btn-secondary" data-i18n="nav.collection">📖 Colección</a>
       </div>
 
-      <p id="ranking-status" class="wallet-status">No conectado</p>
+      <p id="ranking-status" class="wallet-status" data-i18n="wallet.not_connected">No conectado</p>
       <p id="ranking-error" class="menu-error" hidden></p>
       <div id="ranking-progress" class="progress-wrap" hidden>
-        <div class="progress-label" id="ranking-progress-label">Leyendo puntajes on-chain…</div>
+        <div class="progress-label" id="ranking-progress-label" data-i18n="ranking.progress_initial">Leyendo puntajes on-chain…</div>
         <div class="progress-track"><div class="progress-bar" id="ranking-progress-bar"></div></div>
       </div>
     </div>
@@ -43,7 +45,7 @@
         <div class="rank-table-wrap">
           <table class="rank-list" id="rank-table">
             <thead>
-              <tr><th>#</th><th>Jugador</th><th style="text-align:right">Puntaje</th></tr>
+              <tr><th>#</th><th data-i18n="table.player">Jugador</th><th style="text-align:right" data-i18n="table.score">Puntaje</th></tr>
             </thead>
             <tbody id="rank-tbody"></tbody>
           </table>
@@ -55,12 +57,16 @@
 
   <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
   <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
   <script src="js/abis.js"></script>
   <script src="js/wallet.js"></script>
   <script src="js/onchain-events.js"></script>
   <script>
     (function () {
       const CFG = window.R3_CONFIG;
+      const I18N = window.R3I18N;
+      I18N.applyStaticTranslations();
+
       const btnConnect = document.getElementById("btn-connect-ranking");
       const statusEl = document.getElementById("ranking-status");
       const errorEl = document.getElementById("ranking-error");
@@ -87,9 +93,7 @@
 
       async function loadRanking() {
         if (!R3Wallet.isContractConfigured()) {
-          showError(
-            "El contrato del juego todavía no está configurado (GAME_CONTRACT_ADDRESS en js/config.js sigue siendo el placeholder), así que todavía no hay ranking que mostrar."
-          );
+          showError(I18N.t("err.ranking_contract_not_configured"));
           return;
         }
         progressWrap.hidden = false;
@@ -100,11 +104,11 @@
 
           const [scoreLogs, aliasLogs] = await Promise.all([
             R3Events.queryLogsChunked(contract, "ScoreSubmitted", fromBlock, toBlock, (done, total) => {
-              progressLabel.textContent = `Leyendo puntajes on-chain…`;
+              progressLabel.textContent = I18N.t("onchain.reading_scores");
               progressBar.style.width = Math.round((done / total) * 50) + "%";
             }),
             R3Events.queryLogsChunked(contract, "AliasSet", fromBlock, toBlock, (done, total) => {
-              progressLabel.textContent = `Leyendo alias on-chain…`;
+              progressLabel.textContent = I18N.t("onchain.reading_aliases");
               progressBar.style.width = 50 + Math.round((done / total) * 50) + "%";
             }),
           ]);
@@ -128,7 +132,7 @@
 
           if (bestByAddr.size === 0) {
             tbody.innerHTML = "";
-            resultsEl.innerHTML = `<div class="menu-card"><p class="rank-empty">Todavía nadie ha guardado un puntaje en el ranking. ¡Sé el primero desde el juego!</p></div>`;
+            resultsEl.innerHTML = `<div class="menu-card"><p class="rank-empty">${I18N.t("ranking.empty")}</p></div>`;
             return;
           }
 
@@ -144,7 +148,7 @@
                     <span class="rank-alias">${alias ? escapeHtml(alias) : shortAddr(addr)}</span>
                     ${alias ? `<span class="rank-addr">${shortAddr(addr)}</span>` : ""}
                   </td>
-                  <td class="rank-score">${score.toLocaleString("es")}</td>
+                  <td class="rank-score">${I18N.formatScore(score)}</td>
                 </tr>
               `;
             })
@@ -152,7 +156,7 @@
         } catch (err) {
           console.error(err);
           progressWrap.hidden = true;
-          showError((err && err.message) || "No se pudo leer el ranking on-chain.");
+          showError((err && err.message) || I18N.t("err.ranking_read_failed"));
         }
       }
 
@@ -162,14 +166,21 @@
         try {
           const addr = await R3Wallet.connect();
           myAddress = addr;
-          statusEl.textContent = `Conectado: ${R3Wallet.shortAddress(addr)}`;
+          statusEl.textContent = I18N.t("wallet.connected", { addr: R3Wallet.shortAddress(addr) });
           loadRanking(); // re-lee para poder resaltar tu propia fila
         } catch (err) {
           console.error(err);
-          showError((err && err.message) || "No se pudo conectar la wallet.");
+          showError((err && err.message) || I18N.t("err.wallet_connect_failed"));
         } finally {
           btnConnect.disabled = false;
         }
+      });
+
+      window.addEventListener("r3langchange", () => {
+        // El estado de conexión/errores puede tener texto dinámico ya
+        // renderizado en el idioma anterior — lo más simple y confiable es
+        // re-pintar la tabla (si ya había resultados) en el idioma nuevo.
+        if (!resultsEl.hidden) loadRanking();
       });
 
       loadRanking();

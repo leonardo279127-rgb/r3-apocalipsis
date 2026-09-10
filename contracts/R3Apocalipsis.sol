@@ -2,24 +2,45 @@
 pragma solidity ^0.8.24;
 
 /**
- * R3 APOCALIPSIS — contrato de "ficha de partida" (pay-to-play)
+ * R3 APOCALIPSIS — contrato del juego (pago por partida + progreso on-chain)
  * ----------------------------------------------------------------
  * Qué hace:
- *   - El jugador paga un precio fijo en MON para poder jugar una partida.
- *   - El contrato solo recibe y guarda ese pago hasta que el dueño lo retira.
- *   - No custodia NFTs, no pide aprobaciones (approve) de ningún token,
- *     no puede mover fondos del jugador aparte del pago exacto que él mismo envía.
+ *   - El jugador paga el precio actual en MON para jugar una partida
+ *     (playGame() — hoy el precio es 0, es decir GRATIS: solo se paga el
+ *     gas normal de la red. El owner puede subirlo después con
+ *     setPlayPrice(), sin volver a desplegar nada).
+ *   - Alias público por wallet (setAlias/playerAlias), para que el
+ *     ranking muestre un nombre en vez de una dirección larga.
+ *   - Guardado automático de progreso al terminar cada partida, en una
+ *     sola transacción: recordMatch(puntaje, logros nuevos, r3tards
+ *     matados) — reemplaza los antiguos submitScore()/unlockAchievements()
+ *     separados. Revierte con "nada nuevo que guardar" solo si NINGUNA de
+ *     las tres cosas aporta algo nuevo, para no gastar gas de más.
+ *   - Registro GLOBAL y permanente de qué r3tards han muerto alguna vez
+ *     (de cualquier jugador, para siempre) — everKilledGloballyBitmap +
+ *     isEverKilledGlobally() + evento TokenKilled — guardado en un bitmap
+ *     empaquetado (256 tokenIds por casilla de storage) a propósito, para
+ *     que la tarifa alta de la PRIMERA escritura en una casilla nueva se
+ *     pague pocas veces en total y no una vez por cada r3tard.
+ *   - Tarjeta de jugador: un NFT (ERC-721) intransferible por wallet, que
+ *     se mintea solo la primera vez que guardas algo, y cuya imagen/JSON
+ *     se genera al momento reflejando tu alias/puntaje/logros actuales
+ *     (tokenURI) — nunca hay que "actualizarla" a mano.
+ *   - El contrato solo recibe y guarda el pago de las partidas hasta que
+ *     el dueño lo retira (withdraw/withdrawPartial). No custodia NFTs de
+ *     la colección r3tards, no pide aprobaciones (approve) de ningún
+ *     token, no puede mover fondos del jugador aparte del pago exacto que
+ *     él mismo envía.
  *
- * Por qué es así de simple:
- *   - Menos código = menos superficie de bugs. Es literalmente una "máquina
- *     recreativa": metes la moneda (MON), se abre la partida.
- *   - El resultado del juego (puntaje, vidas, etc.) vive en el navegador del
- *     jugador — no on-chain — así que este contrato no necesita fiarse de
- *     nada que el cliente le reporte, y no hay incentivo para que alguien
- *     intente falsear un resultado on-chain.
+ * Por qué el resultado de cada partida (aparte de lo que se guarda arriba)
+ * vive en el navegador del jugador y no on-chain: no hay premio en dinero
+ * ligado al puntaje/logros, así que no vale la pena el costo/complejidad
+ * de validar cada jugada on-chain — ver el comentario de "limitación
+ * honesta anti-trampa" más abajo, junto a recordMatch().
  *
  * Deploy: Remix + tu wallet, red Monad Mainnet (chainId 143). Tú eres el
- * owner (el deployer) automáticamente.
+ * owner (el deployer) automáticamente. Compilar con optimizador Y
+ * "Enable viaIR" activados (ver comentario junto a tokenURI()).
  */
 
 // Versión de OpenZeppelin FIJADA a propósito (@5.1.0, no "la última"): las
@@ -60,24 +81,31 @@ contract R3Apocalipsis is Ownable, Pausable, ReentrancyGuard, ERC721 {
     // el sitio es 100% estático (sin servidor propio), así que esta es la
     // única forma de que el ranking y los logros sean de VERDAD globales
     // (que los vea cualquiera) sin depender de un backend que alguien
-    // tenga que mantener. El costo es una transacción chiquita (gas) cada
-    // vez que alguien mejora su propio récord o desbloquea un logro nuevo
-    // — nunca en cada partida.
+    // tenga que mantener. Todo esto se guarda con UNA sola transacción
+    // automática al terminar cada partida (ver recordMatch más abajo) —
+    // el jugador ya no tiene que apretar botones aparte para "guardar".
     //
     // ⚠️ MISMA LIMITACIÓN YA CONOCIDA que "jugar sin pagar" (ver README):
     // como el juego corre solo en el navegador de cada jugador, sin
     // servidor que verifique nada, alguien técnico PODRÍA llamar
-    // submitScore()/unlockAchievements() directo desde la consola con
-    // números inventados, sin haber jugado de verdad. No hay forma de
-    // cerrar esto al 100% sin un backend propio que valide cada partida
-    // (fuera del alcance de este proyecto, ver README). Como no hay
-    // ningún premio en dinero ligado al puntaje o a los logros, el peor
-    // caso es alguien mintiendo sobre su propio puntaje/logros en un
-    // juego gratis de ver — no hay forma de robar fondos ni de afectar a
-    // otros jugadores con esto.
+    // recordMatch() directo desde la consola con números inventados, sin
+    // haber jugado de verdad. No hay forma de cerrar esto al 100% sin un
+    // backend propio que valide cada partida (fuera del alcance de este
+    // proyecto, ver README). Como no hay ningún premio en dinero ligado
+    // al puntaje, los logros o los r3tards "cazados", el peor caso es
+    // alguien mintiendo sobre su propio historial en un juego gratis de
+    // ver — no hay forma de robar fondos ni de afectar a otros jugadores
+    // con esto.
     // ------------------------------------------------------------------
 
     uint256 public constant MAX_ALIAS_LENGTH = 20;
+
+    /// @notice Tope defensivo de cuántos r3tards distintos se pueden reportar
+    /// matados en UNA sola llamada a recordMatch() — una partida real de
+    /// 10 minutos no debería acercarse a esto ni de lejos; existe solo para
+    /// que nadie pueda armar una transacción absurdamente grande (y cara de
+    /// procesar) a propósito.
+    uint256 public constant MAX_KILLS_PER_MATCH = 300;
 
     /// @notice Alias público que cada wallet puede ponerse (para el ranking).
     mapping(address => string) public playerAlias;
@@ -89,9 +117,47 @@ contract R3Apocalipsis is Ownable, Pausable, ReentrancyGuard, ERC721 {
     /// ver web/js/achievements-onchain.js para la lista con nombres/criterios).
     mapping(address => uint256) public achievementsMask;
 
+    /// @notice ¿Ya murió este r3tard (tokenId) AL MENOS UNA VEZ, en manos de
+    /// CUALQUIER jugador, alguna vez? Para siempre y para cualquiera que
+    /// quiera consultarlo — es lo que alimenta la página de "colección"
+    /// (r3tards a color si ya los cazó alguien, oscuros si nadie todavía).
+    ///
+    /// Guardado como BITMAP empaquetado (256 tokenIds por "palabra" de
+    /// storage) en vez de un booleano por token — con ~1033 tokenIds eso
+    /// son nada más que 5 palabras en total. Esto importa de verdad para
+    /// el gas: la primera vez que se escribe CUALQUIER bit de una palabra
+    /// (0 → algo) cuesta el precio caro de "slot nuevo" (~20000 gas), pero
+    /// esa palabra cubre 256 tokenIds — así que ese costo caro se paga
+    /// como mucho 5 veces en TODA la vida del juego, nunca por cada
+    /// r3tard. Escribir un bit más en una palabra que ya tenía otros bits
+    /// prendidos (lo normal después de las primeras partidas) es mucho
+    /// más barato. Guardar un `mapping(uint256 => bool)` en cambio le
+    /// cobraría el precio caro A CADA TOKEN NUEVO, para siempre — con 50
+    /// r3tards nuevos en una sola partida eso solo del guardado ya sale
+    /// más de 1 millón de gas (medido antes de este cambio); empaquetado
+    /// en palabras, la misma partida sale una fracción de eso.
+    mapping(uint256 => uint256) public everKilledGloballyBitmap;
+
+    /// @notice ¿Ya murió este r3tard (tokenId) alguna vez, en manos de
+    /// cualquier jugador? Lectura directa y gratis (view) del bitmap de
+    /// arriba, sin tener que leer/decodificar eventos a mano.
+    function isEverKilledGlobally(uint256 tokenId) public view returns (bool) {
+        uint256 word = tokenId / 256;
+        uint256 bit = tokenId % 256;
+        return (everKilledGloballyBitmap[word] >> bit) & 1 == 1;
+    }
+
     event AliasSet(address indexed player, string newAlias);
     event ScoreSubmitted(address indexed player, uint256 score, uint256 timestamp);
     event AchievementUnlocked(address indexed player, uint8 achievementId, uint256 timestamp);
+    /// @notice Se emite SOLO la primera vez que este tokenId muere en manos
+    /// de cualquier jugador — `firstKiller` queda para siempre como quien
+    /// se lo "quedó" primero.
+    event TokenKilled(uint256 indexed tokenId, address indexed firstKiller, uint8 tier, uint256 timestamp);
+    /// @notice Un resumen de qué guardó realmente cada llamada a
+    /// recordMatch() — útil para depurar/mostrar en el frontend sin tener
+    /// que releer los otros eventos.
+    event MatchRecorded(address indexed player, uint256 score, uint256 newAchievements, uint256 newGlobalKills);
 
     // ------------------------------------------------------------------
     // Tarjeta de jugador (NFT ERC-721, INTRANSFERIBLE) — a partir de aquí.
@@ -267,30 +333,80 @@ contract R3Apocalipsis is Ownable, Pausable, ReentrancyGuard, ERC721 {
         emit AliasSet(msg.sender, newAlias);
     }
 
-    /// @notice Guarda un nuevo mejor puntaje propio, solo si supera el
-    /// anterior (así nadie paga gas de más por un puntaje que no mejora nada).
-    function submitScore(uint256 score) external {
-        require(score > bestScore[msg.sender], "R3: no supera tu propio mejor puntaje");
-        _ensureCard(msg.sender);
-        bestScore[msg.sender] = score;
-        emit ScoreSubmitted(msg.sender, score, block.timestamp);
-    }
+    /**
+     * @notice Guarda TODO el progreso de la partida que acaba de terminar,
+     * en una sola transacción (así el jugador firma UNA vez, no tres):
+     *   1) Puntaje: solo se actualiza (y emite ScoreSubmitted) si `score`
+     *      supera tu récord anterior. Si no lo supera, simplemente no hace
+     *      nada con el puntaje — NUNCA revierte por esto.
+     *   2) Logros: cada id de `newAchievementIds` que todavía no tenías se
+     *      desbloquea (y emite AchievementUnlocked). Los que ya tenías se
+     *      ignoran en silencio, nunca duplica el evento.
+     *   3) R3tards cazados: cada tokenId de `killedTokenIds` que sea la
+     *      PRIMERA VEZ que muere en manos de cualquier jugador (nunca antes,
+     *      de nadie) se marca para siempre en everKilledGloballyBitmap y emite
+     *      TokenKilled. Si ese tokenId ya había muerto antes (lo normal con
+     *      el tiempo), no hace nada — así re-matar r3tards ya "cazados" es
+     *      prácticamente gratis.
+     * Se llama SOLA desde el frontend apenas termina cada partida (si ya
+     * hay wallet conectada) — el jugador ya no tiene que apretar ningún
+     * botón de "guardar". Revierte solo si de verdad no hay NADA nuevo que
+     * guardar (evita transacciones inútiles).
+     * @param killedTiers mismo largo que killedTokenIds — el índice de tier
+     * (0=común, 1=poco común, 2=raro, 3=épico, 4=legendario, ver
+     * TIER_CHAIN_CODE en web/js/config.js) de cada tokenId, en el mismo orden.
+     */
+    function recordMatch(
+        uint256 score,
+        uint8[] calldata newAchievementIds,
+        uint256[] calldata killedTokenIds,
+        uint8[] calldata killedTiers
+    ) external whenNotPaused {
+        require(killedTokenIds.length == killedTiers.length, "R3: killedTokenIds/killedTiers no coinciden en largo");
+        require(killedTokenIds.length <= MAX_KILLS_PER_MATCH, "R3: demasiados r3tards en una sola partida");
 
-    /// @notice Marca uno o varios logros como desbloqueados de una sola vez
-    /// (para no pagar gas por transacción por cada uno). Los que ya estaban
-    /// desbloqueados se ignoran en silencio, nunca emiten el evento dos veces.
-    function unlockAchievements(uint8[] calldata ids) external {
-        _ensureCard(msg.sender);
+        bool didSomething = false;
+
+        if (score > bestScore[msg.sender]) {
+            bestScore[msg.sender] = score;
+            emit ScoreSubmitted(msg.sender, score, block.timestamp);
+            didSomething = true;
+        }
+
         uint256 mask = achievementsMask[msg.sender];
-        for (uint256 i = 0; i < ids.length; i++) {
-            uint8 id = ids[i];
+        uint256 newAchCount = 0;
+        for (uint256 i = 0; i < newAchievementIds.length; i++) {
+            uint8 id = newAchievementIds[i];
             uint256 bit = 1 << id;
             if (mask & bit == 0) {
                 mask |= bit;
+                newAchCount++;
                 emit AchievementUnlocked(msg.sender, id, block.timestamp);
             }
         }
-        achievementsMask[msg.sender] = mask;
+        if (newAchCount > 0) {
+            achievementsMask[msg.sender] = mask;
+            didSomething = true;
+        }
+
+        uint256 newGlobalKills = 0;
+        for (uint256 i = 0; i < killedTokenIds.length; i++) {
+            uint256 tokenId = killedTokenIds[i];
+            uint256 word = tokenId / 256;
+            uint256 bit = 1 << (tokenId % 256);
+            uint256 bits = everKilledGloballyBitmap[word];
+            if (bits & bit == 0) {
+                everKilledGloballyBitmap[word] = bits | bit;
+                emit TokenKilled(tokenId, msg.sender, killedTiers[i], block.timestamp);
+                newGlobalKills++;
+                didSomething = true;
+            }
+        }
+
+        require(didSomething, "R3: nada nuevo que guardar");
+
+        _ensureCard(msg.sender);
+        emit MatchRecorded(msg.sender, score, newAchCount, newGlobalKills);
     }
 
     /// @notice ¿Esta wallet ya tiene el logro `id`?

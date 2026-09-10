@@ -23,31 +23,37 @@
  * ============================================================
  */
 const R3AchievementDefs = (() => {
+  const I18N = window.R3I18N;
+
+  // `name`/`desc` de cada logro ahora se leen del diccionario bilingüe
+  // de js/i18n.js (claves "achv.<key>.name"/"achv.<key>.desc") en vez de
+  // quedar quemados en español acá — así main.js (game over) y
+  // medallas.html (medallero) muestran cada logro en el idioma activo
+  // del jugador. Se conserva `key` (el nombre corto, ej. "primera_sangre")
+  // precisamente para poder armar esas claves; `name`/`desc` como tal ya
+  // NO se guardan en este arreglo (usar name(def)/desc(def) más abajo).
   const LIST = [
-    { id: 0, key: "primera_sangre", name: "Primera Sangre", desc: "Mata tu primer r3tard.", scope: "session" },
-    { id: 1, key: "cazador_raros", name: "Cazador de Raros", desc: "Mata tu primer r3tard RARO.", scope: "session" },
-    { id: 2, key: "depredador_epico", name: "Depredador Épico", desc: "Mata tu primer r3tard ÉPICO.", scope: "session" },
-    { id: 3, key: "leyenda_personal", name: "Leyenda Personal", desc: "Mata tu primer r3tard LEGENDARIO.", scope: "session" },
-    { id: 4, key: "certificado", name: "Certificado", desc: 'Mata uno de los 38 r3tards "Certified" (piezas 1/1 únicas).', scope: "session" },
-    { id: 5, key: "racha_x10", name: "Racha x10", desc: "Llega a combo x10 en una sola partida.", scope: "session" },
-    { id: 6, key: "maratonista", name: "Maratonista", desc: "Sobrevive 10 minutos seguidos en una sola partida.", scope: "session" },
-    { id: 7, key: "milesimo_punto", name: "Milésimo Punto", desc: "Llega a 1000 puntos o más en una sola partida.", scope: "session" },
-    { id: 8, key: "multi_legendario", name: "Multi-Legendario", desc: "Mata 3 r3tards legendarios en una sola partida.", scope: "session" },
-    {
-      id: 9,
-      key: "cazador_leyendas",
-      name: "Cazador de Leyendas",
-      desc: "Mata 10 r3tards legendarios en total (sumando todas tus partidas en este navegador).",
-      scope: "lifetime",
-    },
-    {
-      id: 10,
-      key: "coleccion_completa",
-      name: "Colección Completa",
-      desc: "Mata alguna vez a cada r3tards distinto de toda la colección (sumando todas tus partidas en este navegador).",
-      scope: "lifetime",
-    },
+    { id: 0, key: "primera_sangre", scope: "session" },
+    { id: 1, key: "cazador_raros", scope: "session" },
+    { id: 2, key: "depredador_epico", scope: "session" },
+    { id: 3, key: "leyenda_personal", scope: "session" },
+    { id: 4, key: "certificado", scope: "session" },
+    { id: 5, key: "racha_x10", scope: "session" },
+    { id: 6, key: "maratonista", scope: "session" },
+    { id: 7, key: "milesimo_punto", scope: "session" },
+    { id: 8, key: "multi_legendario", scope: "session" },
+    { id: 9, key: "cazador_leyendas", scope: "lifetime" },
+    { id: 10, key: "coleccion_completa", scope: "lifetime" },
   ];
+
+  /** Nombre del logro en el idioma activo (ver js/i18n.js). */
+  function name(def) {
+    return def ? I18N.t("achv." + def.key + ".name") : "";
+  }
+  /** Descripción del logro en el idioma activo (ver js/i18n.js). */
+  function desc(def) {
+    return def ? I18N.t("achv." + def.key + ".desc") : "";
+  }
 
   /**
    * Dado el resumen de la partida que acaba de terminar (mismo objeto que
@@ -91,7 +97,7 @@ const R3AchievementDefs = (() => {
     return LIST.find((a) => a.id === id) || null;
   }
 
-  return { LIST, bySessionStats, byLifetimeKills, byId };
+  return { LIST, bySessionStats, byLifetimeKills, byId, name, desc };
 })();
 
 window.R3AchievementDefs = R3AchievementDefs;

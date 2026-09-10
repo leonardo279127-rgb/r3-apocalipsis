@@ -10,6 +10,11 @@
  */
 const R3Game = (() => {
   const CFG = window.R3_CONFIG;
+  // Idioma activo (ver js/i18n.js) — se usa para elegir la versión en
+  // español/inglés de todo lo que el juego le "dice" al jugador durante
+  // la partida: nombres de oleada, nombres de arma, las frases de los
+  // legendarios y las de "cultura nad" de los comunes.
+  const I18N = window.R3I18N;
 
   let canvas, ctx, dpr;
   let running = false;
@@ -45,6 +50,7 @@ const R3Game = (() => {
   // todos lados a la vez, sin forma real de reaccionar).
   let activeThrowers = [];
   let sessionKilledIds = new Set(); // tokenIds distintos matados en ESTA partida — meta: llegar a collection.length (los 1033)
+  let sessionKillDetails = new Map(); // tokenId -> tierKey (mismos distintos de arriba, con su rareza) — para poder mandarlos on-chain al terminar (ver recordMatch en wallet.js)
 
   let spawnTimer = 0;
   let shakeTime = 0;
@@ -82,376 +88,53 @@ const R3Game = (() => {
   // por nivel". Reemplaza al viejo fondo (una imagen translúcida de un
   // r3tard cualquiera, tintada por rareza/oleada), que quedó descartado
   // por completo. Cada lugar es una ilustración dibujada por código
-  // (silueta en capas, sin fotos: ver COUNTRY_SCENES más abajo) — se
-  // dibuja UNA vez a un canvas aparte y se reusa mientras no cambie el
-  // nivel ni el tamaño de pantalla (ensureSceneCache), así no se vuelve
-  // a calcular 60 veces por segundo.
-  let sceneCanvas = null;
-  let sceneCacheKey = "";
+  // (fotos reales, ver COUNTRY_SCENES/countryBgImgs más abajo).
 
+  // `name` es bilingüe ({es, en}, ver auraThemeFor/getLang más abajo en
+  // este mismo archivo para el mismo patrón) — se usa en el HUD
+  // (hud-wave-name) y en el nombre de oleada, así que tiene que salir en
+  // el idioma activo del jugador, no siempre en español.
   const THEMES = [
-    { name: "Grieta Inicial", top: "#150a2b", bottom: "#3a1f68", particle: "#8f7bff", accent: "#6E54FF" },
-    { name: "Tormenta Púrpura", top: "#1a0433", bottom: "#5b12a8", particle: "#c77dff", accent: "#b14aff" },
-    { name: "Núcleo en Llamas", top: "#2a0808", bottom: "#7a1f0e", particle: "#ff8a3d", accent: "#ff5e1a" },
-    { name: "Vacío Cósmico", top: "#020010", bottom: "#12002b", particle: "#9df1ff", accent: "#5eead4" },
-    { name: "Apocalipsis Total", top: "#050005", bottom: "#4a0e6b", particle: "#ff5e9c", accent: "#6E54FF" },
+    { name: { es: "Grieta Inicial", en: "Initial Rift" }, top: "#150a2b", bottom: "#3a1f68", particle: "#8f7bff", accent: "#6E54FF" },
+    { name: { es: "Tormenta Púrpura", en: "Purple Storm" }, top: "#1a0433", bottom: "#5b12a8", particle: "#c77dff", accent: "#b14aff" },
+    { name: { es: "Núcleo en Llamas", en: "Blazing Core" }, top: "#2a0808", bottom: "#7a1f0e", particle: "#ff8a3d", accent: "#ff5e1a" },
+    { name: { es: "Vacío Cósmico", en: "Cosmic Void" }, top: "#020010", bottom: "#12002b", particle: "#9df1ff", accent: "#5eead4" },
+    { name: { es: "Apocalipsis Total", en: "Total Apocalypse" }, top: "#050005", bottom: "#4a0e6b", particle: "#ff5e9c", accent: "#6E54FF" },
   ];
-
-  // ---- Escenas de fondo por país/lugar (ver getCountryIdx/ensureSceneCache) ----
-  // Todo dibujado por código (gradientes + siluetas en capas), cero fotos:
-  // no hay forma segura de bajar fotos reales de internet (derechos de
-  // autor) ni un generador de imágenes fotorrealistas disponible, así que
-  // se optó por ilustraciones estilizadas tipo "postal" — encajan con el
-  // resto del juego (que ya es 100% formas dibujadas, sin más asset que
-  // el logo de Monad y las armas).
-  function ridgeLayer(c, w, h, baseYFrac, freqs, color) {
-    const baseY = h * baseYFrac;
-    c.beginPath();
-    c.moveTo(0, h);
-    const steps = 48;
-    for (let i = 0; i <= steps; i++) {
-      const x = (w * i) / steps;
-      let y = baseY;
-      for (const f of freqs) y += Math.sin((x / w) * f.k * Math.PI * 2 + f.p) * f.a * h;
-      c.lineTo(x, y);
-    }
-    c.lineTo(w, h);
-    c.closePath();
-    c.fillStyle = color;
-    c.fill();
-  }
-  function skyGrad(c, w, h, top, bottom) {
-    const g = c.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, top);
-    g.addColorStop(1, bottom);
-    c.fillStyle = g;
-    c.fillRect(0, 0, w, h);
-  }
-  function smokePlume(c, x, y, s, color) {
-    c.save();
-    c.globalAlpha = 0.35;
-    c.fillStyle = color;
-    for (let i = 0; i < 4; i++) {
-      c.beginPath();
-      c.ellipse(x + Math.sin(i * 1.7) * s * 0.5, y - i * s * 0.9, s * (0.6 + i * 0.22), s * 0.5, 0, 0, Math.PI * 2);
-      c.fill();
-    }
-    c.restore();
+  function themeName(theme) {
+    return theme.name[I18N.getLang()] || theme.name.es;
   }
 
+  // ---- Escenas de fondo por país/lugar (ver getCountryIdx/countryBgImgs) ----
+  // Pedido explícito del usuario ("están horribles los fondos"): reemplaza
+  // a la versión anterior (ilustraciones 100% dibujadas por código) por
+  // FOTOS REALES que el propio usuario mandó y ordenó él mismo, una por
+  // cada uno de los 10 niveles de dificultad. Los archivos viven en
+  // `web/assets/backgrounds/bg-0N-*.jpg` (ya redimensionados/comprimidos).
+  // `accent` se conserva a mano (color de acento para el resplandor
+  // pulsante encima de la foto, ver drawBackground) — no se intentó
+  // extraer un color dominante automáticamente.
   const COUNTRY_SCENES = [
-    // 1. Colombia — cordillera cafetera: niebla verde y terrazas de café.
-    {
-      name: "Colombia",
-      accent: "#7cffb2",
-      draw(c, w, h) {
-        skyGrad(c, w, h, "#ffdca8", "#2f6b4f");
-        ridgeLayer(c, w, h, 0.42, [{ k: 1.1, p: 0.4, a: 0.05 }, { k: 2.3, p: 1.2, a: 0.02 }], "#5f8f6d");
-        ridgeLayer(c, w, h, 0.55, [{ k: 1.6, p: 1.1, a: 0.06 }, { k: 3.1, p: 2.0, a: 0.02 }], "#2f5c42");
-        // Terrazas de café: bandas escalonadas con filitas de matas.
-        for (let row = 0; row < 4; row++) {
-          const y = h * (0.72 + row * 0.065);
-          c.fillStyle = row % 2 === 0 ? "#173625" : "#1f4530";
-          c.fillRect(0, y, w, h * 0.07);
-          c.fillStyle = "#0f2318";
-          for (let x = (row % 2) * 14; x < w; x += 26) c.fillRect(x, y - 4, 6, 6);
-        }
-      },
-    },
-    // 2. Venezuela — Salto Ángel: tepuy y cascada.
-    {
-      name: "Venezuela",
-      accent: "#8fd1ff",
-      draw(c, w, h) {
-        skyGrad(c, w, h, "#274a77", "#0e2438");
-        ridgeLayer(c, w, h, 0.5, [{ k: 0.9, p: 0.2, a: 0.04 }], "#20304a");
-        // Tepuy (meseta rocosa vertical) a la derecha del centro.
-        const tx = w * 0.58, tw = w * 0.24, ty = h * 0.22;
-        c.fillStyle = "#16202f";
-        c.fillRect(tx, ty, tw, h * 0.55);
-        c.beginPath();
-        c.moveTo(tx - w * 0.03, ty + h * 0.05);
-        c.lineTo(tx, ty);
-        c.lineTo(tx + tw, ty);
-        c.lineTo(tx + tw + w * 0.03, ty + h * 0.05);
-        c.closePath();
-        c.fill();
-        // Cascada: franjas verticales claras con neblina en la base.
-        const fx = tx + tw * 0.42;
-        const g = c.createLinearGradient(0, ty, 0, h * 0.82);
-        g.addColorStop(0, "rgba(220,245,255,0.9)");
-        g.addColorStop(1, "rgba(220,245,255,0.15)");
-        c.fillStyle = g;
-        c.fillRect(fx, ty + h * 0.05, w * 0.02, h * 0.72);
-        c.beginPath();
-        c.ellipse(fx + w * 0.01, h * 0.82, w * 0.07, h * 0.035, 0, 0, Math.PI * 2);
-        c.fillStyle = "rgba(230,250,255,0.5)";
-        c.fill();
-        ridgeLayer(c, w, h, 0.86, [{ k: 1.4, p: 0.6, a: 0.03 }], "#0c2a1c");
-      },
-    },
-    // 3. Argentina — Andes/Patagonia: picos afilados nevados.
-    {
-      name: "Argentina",
-      accent: "#ff9d5c",
-      draw(c, w, h) {
-        skyGrad(c, w, h, "#ffb37a", "#3b2350");
-        ridgeLayer(c, w, h, 0.5, [{ k: 2.2, p: 0.3, a: 0.09 }, { k: 5, p: 1.8, a: 0.03 }], "#4a3559");
-        ridgeLayer(c, w, h, 0.62, [{ k: 3.1, p: 1.6, a: 0.11 }, { k: 6, p: 0.4, a: 0.03 }], "#241730");
-        // Nieve: triángulos blancos en las puntas más altas.
-        c.fillStyle = "rgba(255,255,255,0.85)";
-        for (const px of [0.18, 0.34, 0.5, 0.66, 0.82]) {
-          const x = w * px, y = h * (0.36 + Math.sin(px * 12) * 0.05);
-          c.beginPath();
-          c.moveTo(x, y);
-          c.lineTo(x - w * 0.02, y + h * 0.05);
-          c.lineTo(x + w * 0.02, y + h * 0.05);
-          c.closePath();
-          c.fill();
-        }
-      },
-    },
-    // 4. Brasil — Corcovado (Cristo Redentor) y Pan de Azúcar sobre la bahía.
-    {
-      name: "Brasil",
-      accent: "#ffd27a",
-      draw(c, w, h) {
-        skyGrad(c, w, h, "#57c2ff", "#ffd27a");
-        ridgeLayer(c, w, h, 0.68, [{ k: 1.2, p: 0.5, a: 0.04 }], "#0e3a2e");
-        // Pan de Azúcar: domo redondeado a la izquierda.
-        c.fillStyle = "#123";
-        c.beginPath();
-        c.ellipse(w * 0.18, h * 0.6, w * 0.09, h * 0.16, 0, Math.PI, 0, false);
-        c.fill();
-        // Corcovado: cerro con el Cristo Redentor (silueta mínima).
-        const hx = w * 0.6, hy = h * 0.42;
-        c.fillStyle = "#0e3a2e";
-        c.beginPath();
-        c.moveTo(hx - w * 0.16, h * 0.7);
-        c.lineTo(hx, hy);
-        c.lineTo(hx + w * 0.16, h * 0.7);
-        c.closePath();
-        c.fill();
-        c.strokeStyle = "#0a1f18";
-        c.lineWidth = Math.max(2, w * 0.006);
-        c.beginPath();
-        c.moveTo(hx, hy - h * 0.001);
-        c.lineTo(hx, hy - h * 0.09);
-        c.moveTo(hx - w * 0.035, hy - h * 0.065);
-        c.lineTo(hx + w * 0.035, hy - h * 0.065);
-        c.stroke();
-        c.beginPath();
-        c.arc(hx, hy - h * 0.105, w * 0.009, 0, Math.PI * 2);
-        c.fillStyle = "#0a1f18";
-        c.fill();
-      },
-    },
-    // 5. España — espiras estilo Sagrada Familia contra un cielo cálido.
-    {
-      name: "España",
-      accent: "#ffb37a",
-      draw(c, w, h) {
-        skyGrad(c, w, h, "#ffe1a8", "#b5502f");
-        ridgeLayer(c, w, h, 0.82, [{ k: 1.1, p: 0.2, a: 0.02 }], "#3a1a12");
-        const spires = [0.32, 0.42, 0.5, 0.58, 0.68];
-        spires.forEach((px, i) => {
-          const x = w * px, hgt = h * (0.22 + (i % 2) * 0.08);
-          const baseY = h * 0.68, topY = baseY - hgt, sw = w * 0.03;
-          c.fillStyle = "#2a1710";
-          c.beginPath();
-          c.moveTo(x - sw, baseY);
-          c.lineTo(x - sw * 0.3, topY);
-          c.lineTo(x, topY - h * 0.03);
-          c.lineTo(x + sw * 0.3, topY);
-          c.lineTo(x + sw, baseY);
-          c.closePath();
-          c.fill();
-        });
-        c.fillStyle = "#2a1710";
-        c.fillRect(0, h * 0.66, w, h * 0.04);
-      },
-    },
-    // 6. Francia — Torre Eiffel y techos parisinos al atardecer.
-    {
-      name: "Francia",
-      accent: "#c77dff",
-      draw(c, w, h) {
-        skyGrad(c, w, h, "#2b1f4d", "#ff9ecb");
-        ridgeLayer(c, w, h, 0.78, [{ k: 0.8, p: 0.3, a: 0.015 }], "#1a1230");
-        // Techos (mansardas) — fila de rectángulos con techo triangular.
-        for (let x = 0; x < w; x += w * 0.09) {
-          const bh = h * (0.06 + (Math.sin(x) * 0.5 + 0.5) * 0.03);
-          c.fillStyle = "#1a1230";
-          c.fillRect(x, h * 0.78 - bh, w * 0.085, bh);
-          c.beginPath();
-          c.moveTo(x, h * 0.78 - bh);
-          c.lineTo(x + w * 0.0425, h * 0.78 - bh - h * 0.02);
-          c.lineTo(x + w * 0.085, h * 0.78 - bh);
-          c.closePath();
-          c.fill();
-        }
-        // Torre Eiffel: patas convergentes + travesaños simples.
-        const ex = w * 0.5, ebase = h * 0.78, etop = h * 0.18, ew = w * 0.1;
-        c.strokeStyle = "#160f28";
-        c.lineWidth = Math.max(2, w * 0.006);
-        c.beginPath();
-        c.moveTo(ex - ew, ebase);
-        c.lineTo(ex, etop);
-        c.lineTo(ex + ew, ebase);
-        c.moveTo(ex - ew * 0.55, (ebase + etop) / 2 + h * 0.05);
-        c.lineTo(ex + ew * 0.55, (ebase + etop) / 2 + h * 0.05);
-        c.moveTo(ex - ew * 0.22, etop + h * 0.09);
-        c.lineTo(ex + ew * 0.22, etop + h * 0.09);
-        c.stroke();
-      },
-    },
-    // 7. Alemania — castillo bávaro entre pinos, niebla de amanecer.
-    {
-      name: "Alemania",
-      accent: "#8fb8ff",
-      draw(c, w, h) {
-        skyGrad(c, w, h, "#a9c6e0", "#3a4a63");
-        ridgeLayer(c, w, h, 0.6, [{ k: 1.4, p: 0.6, a: 0.05 }], "#2e3d52");
-        // Pinos.
-        c.fillStyle = "#1c2a3a";
-        for (let x = w * 0.05; x < w; x += w * 0.07) {
-          const th = h * (0.1 + ((x * 13) % 5) * 0.01);
-          const by = h * 0.72;
-          c.beginPath();
-          c.moveTo(x, by - th);
-          c.lineTo(x - w * 0.018, by);
-          c.lineTo(x + w * 0.018, by);
-          c.closePath();
-          c.fill();
-        }
-        // Castillo: torres con techo cónico.
-        const cx = w * 0.5, base = h * 0.66;
-        c.fillStyle = "#232f42";
-        c.fillRect(cx - w * 0.09, base - h * 0.16, w * 0.18, h * 0.16);
-        [-1, 1].forEach((s) => {
-          const tx = cx + s * w * 0.1;
-          c.fillRect(tx - w * 0.022, base - h * 0.24, w * 0.044, h * 0.24);
-          c.beginPath();
-          c.moveTo(tx - w * 0.03, base - h * 0.24);
-          c.lineTo(tx, base - h * 0.32);
-          c.lineTo(tx + w * 0.03, base - h * 0.24);
-          c.closePath();
-          c.fillStyle = "#c0405a";
-          c.fill();
-          c.fillStyle = "#232f42";
-        });
-      },
-    },
-    // 8. China — la Gran Muralla sobre las colinas, pagoda al fondo.
-    {
-      name: "China",
-      accent: "#ffb84d",
-      draw(c, w, h) {
-        skyGrad(c, w, h, "#ffe9c2", "#c98a4b");
-        ridgeLayer(c, w, h, 0.55, [{ k: 1.5, p: 0.4, a: 0.06 }], "#8a6a4a");
-        ridgeLayer(c, w, h, 0.68, [{ k: 2.0, p: 1.3, a: 0.05 }], "#5f4530");
-        // Pagoda a lo lejos: pisos apilados decrecientes.
-        const px = w * 0.2, pbase = h * 0.6;
-        for (let i = 0; i < 3; i++) {
-          const pw = w * (0.1 - i * 0.024), py = pbase - i * h * 0.06;
-          c.fillStyle = "#3a2a1c";
-          c.fillRect(px - pw / 2, py - h * 0.045, pw, h * 0.045);
-        }
-        // Muralla: línea zigzagueante con almenas, siguiendo la cresta.
-        c.strokeStyle = "#3a2a1c";
-        c.lineWidth = Math.max(3, w * 0.01);
-        c.beginPath();
-        for (let i = 0; i <= 40; i++) {
-          const x = (w * i) / 40;
-          const y = h * 0.68 + Math.sin((x / w) * 2 * Math.PI + 1.3) * h * 0.05;
-          if (i === 0) c.moveTo(x, y);
-          else c.lineTo(x, y);
-        }
-        c.stroke();
-      },
-    },
-    // 9. Japón — Monte Fuji nevado y un torii en primer plano.
-    {
-      name: "Japón",
-      accent: "#ff9ecf",
-      draw(c, w, h) {
-        skyGrad(c, w, h, "#ffd9ec", "#6f8fae");
-        // Fuji: triángulo simétrico con nieve en la cima.
-        const fx = w * 0.55, fbase = h * 0.62, ftop = h * 0.22, fw = w * 0.28;
-        c.fillStyle = "#4a5b73";
-        c.beginPath();
-        c.moveTo(fx - fw, fbase);
-        c.lineTo(fx, ftop);
-        c.lineTo(fx + fw, fbase);
-        c.closePath();
-        c.fill();
-        c.fillStyle = "rgba(255,255,255,0.92)";
-        c.beginPath();
-        c.moveTo(fx, ftop);
-        c.lineTo(fx - fw * 0.32, ftop + h * 0.09);
-        c.lineTo(fx - fw * 0.12, ftop + h * 0.06);
-        c.lineTo(fx, ftop + h * 0.1);
-        c.lineTo(fx + fw * 0.14, ftop + h * 0.055);
-        c.lineTo(fx + fw * 0.32, ftop + h * 0.09);
-        c.closePath();
-        c.fill();
-        ridgeLayer(c, w, h, 0.72, [{ k: 1.1, p: 0.5, a: 0.02 }], "#2b3a4d");
-        // Torii en primer plano, silueta roja/naranja.
-        const tx = w * 0.22, tb = h * 0.86, tt = h * 0.6, tw2 = w * 0.16;
-        c.fillStyle = "#c94a2c";
-        c.fillRect(tx - tw2 / 2, tt, w * 0.02, tb - tt);
-        c.fillRect(tx + tw2 / 2 - w * 0.02, tt, w * 0.02, tb - tt);
-        c.fillRect(tx - tw2 / 2 - w * 0.02, tt, tw2 + w * 0.04, h * 0.022);
-        c.fillRect(tx - tw2 / 2 + w * 0.015, tt + h * 0.03, tw2 - w * 0.03, h * 0.016);
-      },
-    },
-    // 10. Gary, Indiana — skyline industrial oxidado, el nivel más difícil.
-    {
-      name: "Gary, Indiana",
-      accent: "#ff7a45",
-      draw(c, w, h) {
-        skyGrad(c, w, h, "#7a5230", "#241a12");
-        ridgeLayer(c, w, h, 0.86, [{ k: 1.0, p: 0.2, a: 0.015 }], "#1a120c");
-        // Bloques de fábrica de distinto alto.
-        c.fillStyle = "#150f0a";
-        let x = 0;
-        while (x < w) {
-          const bw = w * (0.05 + ((x * 7) % 5) * 0.01);
-          const bh = h * (0.12 + ((x * 13) % 7) * 0.02);
-          c.fillRect(x, h * 0.82 - bh, bw, bh);
-          x += bw + w * 0.01;
-        }
-        // Chimeneas con humo.
-        [0.22, 0.5, 0.74].forEach((px, i) => {
-          const cx = w * px, cbase = h * 0.82, ctop = cbase - h * (0.22 + i * 0.04);
-          c.fillStyle = "#0f0a07";
-          c.fillRect(cx - w * 0.012, ctop, w * 0.024, cbase - ctop);
-          smokePlume(c, cx, ctop, w * 0.03, "#8a7a6a");
-        });
-      },
-    },
+    { name: "Colombia", accent: "#7cffb2", file: "bg-01-colombia.jpg" },
+    { name: "Venezuela", accent: "#8fd1ff", file: "bg-02-venezuela.jpg" },
+    { name: "Argentina", accent: "#ff9d5c", file: "bg-03-argentina.jpg" },
+    { name: "Brasil", accent: "#ffd27a", file: "bg-04-brasil.jpg" },
+    { name: "España", accent: "#ffb37a", file: "bg-05-espana.jpg" },
+    { name: "Francia", accent: "#c77dff", file: "bg-06-francia.jpg" },
+    { name: "Alemania", accent: "#8fb8ff", file: "bg-07-alemania.jpg" },
+    { name: "China", accent: "#ffb84d", file: "bg-08-china.jpg" },
+    { name: "Japón", accent: "#ff9ecf", file: "bg-09-japon.jpg" },
+    { name: "Gary, Indiana", accent: "#ff7a45", file: "bg-10-gary-indiana.jpg" },
   ];
+  // Un <img> por nivel, precargado una sola vez (ver init()) — igual que
+  // monadOrbImg/weaponImgs más abajo.
+  const countryBgImgs = [];
 
   /** Nivel de dificultad real (1-10, ver SPAWN_PROGRESSION) → índice 0-9
    * en COUNTRY_SCENES. El nivel 0 (antes del primer minuto) usa el mismo
    * lugar que el nivel 1, para no arrancar la partida sin escenario. */
   function getCountryIdx() {
     return Math.max(0, Math.min(COUNTRY_SCENES.length - 1, lastDifficultyStep - 1));
-  }
-
-  /** Dibuja la escena del país actual UNA sola vez a un canvas aparte
-   * (offscreen) y la reusa mientras no cambie ni el nivel ni el tamaño de
-   * pantalla — evita rehacer gradientes/siluetas 60 veces por segundo. */
-  function ensureSceneCache(idx) {
-    const w = Math.max(1, Math.round(cssW()));
-    const h = Math.max(1, Math.round(cssH()));
-    const key = idx + "x" + w + "x" + h;
-    if (sceneCacheKey === key) return;
-    sceneCacheKey = key;
-    if (!sceneCanvas) sceneCanvas = document.createElement("canvas");
-    sceneCanvas.width = w;
-    sceneCanvas.height = h;
-    COUNTRY_SCENES[idx].draw(sceneCanvas.getContext("2d"), w, h);
   }
 
   let monadOrbImg = null;
@@ -484,10 +167,10 @@ const R3Game = (() => {
    */
   const WEAPON_TIER_META = [
     null, // tier 0: sin arma todavía, disparo simple (el de siempre)
-    { imgKey: "epic", burst: 2, label: "Pistola" },
-    { imgKey: "legendary1", burst: 3, label: "Revólver" },
-    { imgKey: "legendary5", burst: 4, label: "Subfusil" },
-    { imgKey: "legendary10", burst: 5, label: "Rifle" },
+    { imgKey: "epic", burst: 2, label: { es: "Pistola", en: "Pistol" } },
+    { imgKey: "legendary1", burst: 3, label: { es: "Revólver", en: "Revolver" } },
+    { imgKey: "legendary5", burst: 4, label: { es: "Subfusil", en: "SMG" } },
+    { imgKey: "legendary10", burst: 5, label: { es: "Rifle", en: "Rifle" } },
   ];
   function currentWeaponTier() {
     const legKills = killsByTier.legendary || 0;
@@ -526,6 +209,15 @@ const R3Game = (() => {
       img.src = `assets/weapons/w-${key}.png`;
       weaponImgs[key] = img;
     }
+
+    // Las 10 fotos de fondo (una por nivel/país, ver COUNTRY_SCENES) —
+    // se precargan todas de una vez al iniciar, así ya están listas
+    // (o casi) para cuando el nivel de dificultad las necesite.
+    COUNTRY_SCENES.forEach((scene, i) => {
+      const img = new Image();
+      img.src = `assets/backgrounds/${scene.file}`;
+      countryBgImgs[i] = img;
+    });
 
     resize();
     window.addEventListener("resize", resize);
@@ -972,8 +664,34 @@ const R3Game = (() => {
       tremble: false,
       blink: false,
       blinkPhase: Math.random() * Math.PI * 2,
+      drift: false,
+      driftVx: 0,
+      spin: false,
+      spinSpeed: 0,
+      spinPhase: Math.random() * Math.PI * 2,
     };
-    if (tierKey === "rare") {
+    if (tierKey === "uncommon" || tierKey === "common") {
+      // Pedido explícito: antes los comunes/poco comunes SIEMPRE caían en
+      // línea recta y sin ninguna gracia ("muy plano"). Se les da una
+      // pizca de vida — un poquito de zigzag o una deriva lateral lenta
+      // (bastante más suave que la de "raro" en adelante, para que sigan
+      // siendo fáciles de acertar), más una probabilidad de "giro" que es
+      // PURAMENTE VISUAL (rota su propio retrato dentro del círculo, no
+      // mueve su punto real de golpeo) — nada de esto los hace más
+      // difíciles, es solo para que no todos se sientan idénticos, sin
+      // quitarle protagonismo a los raros/épicos/legendarios.
+      const flavorRoll = Math.random();
+      if (flavorRoll < 0.16) {
+        m.zigzag = true;
+        m.zigAmp = 8 + Math.random() * 7; // bastante más chico que "raro" (18-30)
+        m.zigFreq = 0.55 + Math.random() * 0.35;
+      } else if (flavorRoll < 0.28) {
+        m.drift = true;
+        m.driftVx = (Math.random() < 0.5 ? -1 : 1) * (10 + Math.random() * 14);
+      }
+      m.spin = Math.random() < 0.22;
+      m.spinSpeed = (Math.random() < 0.5 ? -1 : 1) * (0.6 + Math.random() * 1.1);
+    } else if (tierKey === "rare") {
       if (Math.random() < 0.35) {
         m.zigzag = true;
         m.zigAmp = 18 + Math.random() * 12;
@@ -1120,6 +838,16 @@ const R3Game = (() => {
     const pointsValue = Math.round(tier.points * rarityBonusMultiplier(item));
     const movement = pickMovementPattern(tier.key);
 
+    // 2% de probabilidad de que este r3tard COMÚN venga con una frase de
+    // "cultura nad" (ver R3I18N.COMMON_NAD_PHRASES/nft.commonTauntTimer más
+    // abajo). Las frases viven en js/i18n.js (bilingüe, ver ahí el porqué)
+    // — se elige del set del idioma ACTIVO, no siempre del español.
+    const nadPhrasesPool = I18N.COMMON_NAD_PHRASES[I18N.getLang()] || I18N.COMMON_NAD_PHRASES.es;
+    const commonTaunt =
+      tier.key === "common" && Math.random() < 0.02
+        ? nadPhrasesPool[(Math.random() * nadPhrasesPool.length) | 0]
+        : null;
+
     // La personalidad de cada legendario también manda sobre cómo se
     // mueve — pisa lo que haya tirado pickMovementPattern al azar, para
     // que SIEMPRE sea el mismo tipo de movimiento para ese personaje
@@ -1237,6 +965,12 @@ const R3Game = (() => {
       // flotantes mientras sigue vivo (ver update()/floatText) — solo
       // los legendarios "hablan".
       tauntTimer: legendaryTheme ? 2200 + Math.random() * 1800 : null,
+      // Pedido explícito: 2% de probabilidad de que un r3tard COMÚN suelte
+      // una frase de "cultura nad" (gmonad, nad nad nad, mascotas de
+      // Monad, cripto-Twitter, humor propio...) — ver COMMON_NAD_PHRASES.
+      // A diferencia de los legendarios, es UNA sola vez, nunca en bucle.
+      commonTaunt: commonTaunt,
+      commonTauntTimer: commonTaunt ? 350 + Math.random() * 500 : null,
     };
     falling.push(nft);
 
@@ -1264,7 +998,7 @@ const R3Game = (() => {
       tokenId: item.tokenId,
       name: displayName,
       isCertified,
-      tierLabel: tier.label,
+      tierLabel: I18N.tierLabel(tier.key, { upper: true }),
       tierKey: tier.key,
       color: tier.color,
       big: tier.key === "rare" || tier.key === "epic" || tier.key === "legendary",
@@ -1391,9 +1125,20 @@ const R3Game = (() => {
     }
   }
 
-  function floatText(x, y, text, color) {
-    floatTexts.push({ x, y, text, color, life: 1.1, vy: -46 });
+  function floatText(x, y, text, color, small) {
+    // `small` (opcional): usado por las frases de los r3tards COMUNES (ver
+    // COMMON_NAD_PHRASES/spawnNFT) — más chicas y discretas que las de los
+    // legendarios, para que no les quiten protagonismo.
+    floatTexts.push({ x, y, text, color, life: small ? 0.9 : 1.1, vy: small ? -38 : -46, small: !!small });
   }
+
+  // Frases sueltas de "cultura nad" que un r3tard COMÚN puede soltar al
+  // azar mientras cae (ver spawnNFT: 2% de probabilidad por cada uno que
+  // aparece, una sola vez, nunca en bucle como los legendarios). El set
+  // completo de frases (español + su traducción al inglés, ~200 cada
+  // una) vive en js/i18n.js -> R3I18N.COMMON_NAD_PHRASES, no acá — así
+  // queda junto con el resto del contenido bilingüe del juego en vez de
+  // duplicado en dos archivos.
 
   // ---------------------------------------------------------------
   // Update
@@ -1406,7 +1151,7 @@ const R3Game = (() => {
     const newWave = Math.floor(score / 450) + 1;
     if (newWave !== wave) {
       wave = newWave;
-      onWaveChange(wave, THEMES[(wave - 1) % THEMES.length].name);
+      onWaveChange(wave, themeName(THEMES[(wave - 1) % THEMES.length]));
       R3Audio.waveUp();
     }
 
@@ -1459,10 +1204,23 @@ const R3Game = (() => {
       if (n.tauntTimer !== null) {
         n.tauntTimer -= dt * 1000;
         if (n.tauntTimer <= 0) {
-          const phrases = n.legendaryTheme.taunts;
+          const phrases = n.legendaryTheme.taunts[I18N.getLang()] || n.legendaryTheme.taunts.es;
           const phrase = phrases[(Math.random() * phrases.length) | 0];
           floatText(n.x, n.y - n.size / 2 - 8, phrase, n.legendaryTheme.glowColor);
           n.tauntTimer = 3200 + Math.random() * 2600;
+        }
+      }
+
+      // Frase de "cultura nad" de un r3tard COMÚN (ver COMMON_NAD_PHRASES/
+      // spawnNFT: 2% de probabilidad al aparecer) — a diferencia de los
+      // legendarios, esto pasa UNA sola vez por r3tard (no en bucle) y se
+      // dibuja más chico/discreto (floatText con small=true), justo para
+      // que sea un detalle simpático sin robarle protagonismo a nadie.
+      if (n.commonTauntTimer !== null) {
+        n.commonTauntTimer -= dt * 1000;
+        if (n.commonTauntTimer <= 0) {
+          floatText(n.x, n.y - n.size / 2 - 6, n.commonTaunt, "#c9c9d6", true);
+          n.commonTauntTimer = null;
         }
       }
 
@@ -1505,6 +1263,21 @@ const R3Game = (() => {
       if (mv && mv.zigzag) {
         const osc = Math.sin(performance.now() / 1000 * mv.zigFreq + mv.zigPhase) * mv.zigAmp;
         n.x = Math.max(n.size / 2, Math.min(cssW() - n.size / 2, n.baseX + osc));
+      }
+
+      // Deriva lateral lenta y constante (distinta al vaivén del zigzag) —
+      // ver pickMovementPattern: solo comunes/poco comunes, como toque de
+      // variedad. Rebota suave contra los bordes en vez de salirse.
+      if (mv && mv.drift) {
+        n.baseX += mv.driftVx * dt;
+        if (n.baseX < n.size / 2) {
+          n.baseX = n.size / 2;
+          mv.driftVx *= -1;
+        } else if (n.baseX > cssW() - n.size / 2) {
+          n.baseX = cssW() - n.size / 2;
+          mv.driftVx *= -1;
+        }
+        n.x = n.baseX;
       }
 
       // "Charger" (ver quirk en LEGENDARY_AURA_THEMES): se va acelerando
@@ -1576,7 +1349,7 @@ const R3Game = (() => {
         onLivesChange(lives);
         R3Audio.playerHit();
         burst(avatarHitX, avatarHitY, p.color, 16, 0.8);
-        floatText(avatarHitX, avatarHitY - 40, "¡TE DIERON!", p.color);
+        floatText(avatarHitX, avatarHitY - 40, I18N.t("float.hit"), p.color);
         shakeTime = 0.3;
         shakeMag = 10;
         combo = 0;
@@ -1672,7 +1445,10 @@ const R3Game = (() => {
         if (lives !== livesBefore) {
           onLivesChange(lives);
           const gained = Math.round((lives - livesBefore) * 10) / 10;
-          const gainLabel = n.tierKey === "legendary" ? "¡VIDA AL MÁXIMO!" : `+${gained} vida${gained === 1 ? "" : "s"}`;
+          const gainLabel =
+            n.tierKey === "legendary"
+              ? I18N.t("float.life_max")
+              : I18N.t("float.life_gained", { n: gained, unit: I18N.t(gained === 1 ? "unit.life" : "unit.lives") });
           floatText(n.x, n.y - 34, gainLabel, "#8f7bff");
         }
       }
@@ -1693,7 +1469,7 @@ const R3Game = (() => {
         // mostrable sin importar cómo se cargó la colección esa partida.
         image: resolvedImageUrl(n.image),
         tierKey: n.tierKey,
-        tierLabel: n.tier.label,
+        tierLabel: I18N.tierLabel(n.tier.key, { upper: true }),
         points: pts,
       });
 
@@ -1703,6 +1479,7 @@ const R3Game = (() => {
       // collection.length) se gana la partida (ver winGame()).
       if (!sessionKilledIds.has(n.tokenId)) {
         sessionKilledIds.add(n.tokenId);
+        sessionKillDetails.set(n.tokenId, n.tierKey);
         onProgress(sessionKilledIds.size, collection.length);
       }
 
@@ -1734,28 +1511,41 @@ const R3Game = (() => {
   // ---------------------------------------------------------------
   function drawBackground() {
     // Un lugar real distinto por cada nivel de dificultad (ver
-    // COUNTRY_SCENES/getCountryIdx más arriba) — pedido explícito: "los
-    // fondos no me gustan, le falta vida, pon un lugar característico
-    // por nivel". La ilustración se dibuja una sola vez por nivel/tamaño
-    // de pantalla (ensureSceneCache) y de ahí en más solo se copia.
+    // COUNTRY_SCENES/getCountryIdx/countryBgImgs más arriba) — pedido
+    // explícito: fotos REALES que mandó el usuario, una por país/nivel
+    // (reemplaza a la versión anterior, ilustrada por código, que el
+    // usuario encontró "horrible"). Se dibuja con encaje tipo "cover"
+    // (recorta lo que sobre, nunca deforma la foto) para llenar el
+    // canvas sin importar el tamaño de pantalla.
     const idx = getCountryIdx();
-    ensureSceneCache(idx);
-    if (sceneCanvas) ctx.drawImage(sceneCanvas, 0, 0, cssW(), cssH());
     const scene = COUNTRY_SCENES[idx];
+    const img = countryBgImgs[idx];
+    const w = cssW(), h = cssH();
+    if (img && img.complete && img.naturalWidth) {
+      const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+      const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+      ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    } else {
+      // Todavía no cargó (o falló) — fondo plano con el color de acento
+      // del lugar, para no dejar la pantalla en negro puro mientras tanto.
+      ctx.fillStyle = scene.accent + "22";
+      ctx.fillRect(0, 0, w, h);
+    }
 
-    // Oscurecido leve encima del paisaje, solo para que el avatar, los
-    // r3tards y los textos se sigan leyendo bien — mucho más sutil que
-    // antes (0.55 → 0.32) para no "apagarle la vida" a la ilustración.
-    ctx.fillStyle = "rgba(6,3,14,0.32)";
-    ctx.fillRect(0, 0, cssW(), cssH());
+    // Oscurecido encima de la foto, para que el avatar, los r3tards y los
+    // textos se sigan leyendo bien — las fotos reales tienen mucho más
+    // detalle/contraste que las ilustraciones anteriores, así que este
+    // oscurecido quedó un poco más fuerte que antes (0.32 → 0.4).
+    ctx.fillStyle = "rgba(6,3,14,0.4)";
+    ctx.fillRect(0, 0, w, h);
 
     // Resplandor pulsante con el color de acento del propio lugar.
     const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 900);
-    const rg = ctx.createRadialGradient(cssW() / 2, cssH() * 0.35, 0, cssW() / 2, cssH() * 0.35, cssW() * 0.7);
+    const rg = ctx.createRadialGradient(w / 2, h * 0.35, 0, w / 2, h * 0.35, w * 0.7);
     rg.addColorStop(0, scene.accent + Math.round(16 + pulse * 12).toString(16).padStart(2, "0"));
     rg.addColorStop(1, "transparent");
     ctx.fillStyle = rg;
-    ctx.fillRect(0, 0, cssW(), cssH());
+    ctx.fillRect(0, 0, w, h);
   }
 
   /**
@@ -1801,49 +1591,73 @@ const R3Game = (() => {
       key: "fuego", glowColor: "#ff7a1a", raySpokes: 8, rayStyle: "line",
       wave: { rings: 4, amp: 11, freq: 8, speed: 4.2, spacing: 8, width: 2.6, glow: 22, colors: ["#fff3b0", "#ff9a3d", "#ff3d1a", "#ff9a3d"] },
       throwKinds: ["tomate", "roca", "rayo"], pitch: 0.82, quirk: "charger", hardness: 4,
-      taunts: ["🔥 ¡Arde con esto!", "Soy pura candela", "¿Sientes el calor?", "Te voy a achicharrar"],
+      taunts: {
+        es: ["🔥 ¡Arde con esto!", "Soy pura candela", "¿Sientes el calor?", "Te voy a achicharrar"],
+        en: ["🔥 Burn with this!", "I'm pure fire", "Feel the heat?", "I'm gonna scorch you"],
+      },
     },
     {
       key: "agua", glowColor: "#3ec6ff", raySpokes: 6, rayStyle: "dot",
       wave: { rings: 4, amp: 5.5, freq: 5, speed: 1.7, spacing: 10, width: 2.4, glow: 20, colors: ["#bdf1ff", "#3ec6ff", "#1a6fff", "#3ec6ff"] },
       throwKinds: ["pato", "tomate", "hueso"], pitch: 1.15, quirk: "weaver", hardness: 1,
-      taunts: ["🌊 ¡Prepárate a mojarte!", "Fluyo donde quiera", "Nadando hacia la victoria", "Splash"],
+      taunts: {
+        es: ["🌊 ¡Prepárate a mojarte!", "Fluyo donde quiera", "Nadando hacia la victoria", "Splash"],
+        en: ["🌊 Get ready to get wet!", "I flow wherever I want", "Swimming to victory", "Splash"],
+      },
     },
     {
       key: "tierra", glowColor: "#b08d4a", raySpokes: 6, rayStyle: "rock",
       wave: { rings: 3, amp: 4, freq: 4, speed: 1.3, spacing: 11, width: 3.4, glow: 16, colors: ["#c9a15a", "#7a5a2a", "#9ee08a", "#7a5a2a"] },
       throwKinds: ["roca", "basura", "hueso"], pitch: 0.8, quirk: "tank", hardness: 0,
-      taunts: ["🪨 Sólido como roca", "No me vas a mover", "Esto sí que pesa", "Duro de romper"],
+      taunts: {
+        es: ["🪨 Sólido como roca", "No me vas a mover", "Esto sí que pesa", "Duro de romper"],
+        en: ["🪨 Solid as rock", "You're not moving me", "Now THIS has weight", "Hard to break"],
+      },
     },
     {
       key: "rayos", glowColor: "#fff36a", raySpokes: 9, rayStyle: "jagged",
       wave: { rings: 3, amp: 13, freq: 11, speed: 6.5, spacing: 7, width: 1.8, glow: 26, colors: ["#ffffff", "#fff36a", "#8ecbff", "#fff36a"] },
       throwKinds: ["rayo", "laser", "rayo"], pitch: 1.35, quirk: "teleport", hardness: 7,
-      taunts: ["⚡ ¡Sentirás la descarga!", "Más rápido que la luz", "Aquí, allá... ¡atrápame!", "Electrizante, ¿no?"],
+      taunts: {
+        es: ["⚡ ¡Sentirás la descarga!", "Más rápido que la luz", "Aquí, allá... ¡atrápame!", "Electrizante, ¿no?"],
+        en: ["⚡ You'll feel the shock!", "Faster than light", "Here, there... catch me!", "Electrifying, right?"],
+      },
     },
     {
       key: "cristal", glowColor: "#c77dff", raySpokes: 7, rayStyle: "diamond",
       wave: { rings: 4, amp: 8, freq: 7.5, speed: 3.2, spacing: 9, width: 2.2, glow: 26, colors: ["#f3d9ff", "#c77dff", "#ff9de3", "#c77dff"] },
       throwKinds: ["disco", "roca", "laser"], pitch: 1.2, quirk: "teleport", hardness: 5,
-      taunts: ["💎 Filoso como el cristal", "Reluciente y letal", "Brillo mortal", "Nunca me quiebro"],
+      taunts: {
+        es: ["💎 Filoso como el cristal", "Reluciente y letal", "Brillo mortal", "Nunca me quiebro"],
+        en: ["💎 Sharp as crystal", "Shiny and lethal", "Deadly shine", "I never break"],
+      },
     },
     {
       key: "viento", glowColor: "#bdf2c9", raySpokes: 6, rayStyle: "arc",
       wave: { rings: 3, amp: 6, freq: 9, speed: 5.5, spacing: 9, width: 1.6, glow: 16, colors: ["#ffffff", "#bdf2c9", "#eafff0"] },
       throwKinds: ["calzoncillo", "tv", "basura"], pitch: 1.25, quirk: "weaver", hardness: 2,
-      taunts: ["💨 ¡Que te lleve el viento!", "Ligero pero letal", "Sopla fuerte hoy", "Atrápame si puedes"],
+      taunts: {
+        es: ["💨 ¡Que te lleve el viento!", "Ligero pero letal", "Sopla fuerte hoy", "Atrápame si puedes"],
+        en: ["💨 Let the wind take you!", "Light but lethal", "Blowing hard today", "Catch me if you can"],
+      },
     },
     {
       key: "cosmico", glowColor: "#b06bff", raySpokes: 10, rayStyle: "twinkle",
       wave: { rings: 4, amp: 7, freq: 6, speed: 2.6, spacing: 10, width: 2, glow: 28, colors: ["#e6d6ff", "#b06bff", "#4d2b8f", "#b06bff"] },
       throwKinds: ["otro_r3tard", "disco", "rayo"], pitch: 0.7, quirk: "teleport", hardness: 6,
-      taunts: ["🌌 Vengo de otra dimensión", "El cosmos me protege", "Nada es coincidencia", "Ni me viste llegar"],
+      taunts: {
+        es: ["🌌 Vengo de otra dimensión", "El cosmos me protege", "Nada es coincidencia", "Ni me viste llegar"],
+        en: ["🌌 I come from another dimension", "The cosmos protects me", "Nothing is a coincidence", "You didn't even see me arrive"],
+      },
     },
     {
       key: "toxico", glowColor: "#9dff5e", raySpokes: 7, rayStyle: "bubble",
       wave: { rings: 3, amp: 9, freq: 5, speed: 2.4, spacing: 10, width: 2.4, glow: 18, colors: ["#e2ff9d", "#9dff5e", "#2b7a1a", "#9dff5e"] },
       throwKinds: ["perro", "basura", "tomate"], pitch: 0.9, quirk: "tank", hardness: 3,
-      taunts: ["☠️ No respires cerca", "Contaminando el ambiente", "Tóxico y orgulloso", "Aléjate si puedes"],
+      taunts: {
+        es: ["☠️ No respires cerca", "Contaminando el ambiente", "Tóxico y orgulloso", "Aléjate si puedes"],
+        en: ["☠️ Don't breathe near me", "Polluting the air", "Toxic and proud", "Get away if you can"],
+      },
     },
   ];
   function auraThemeFor(tokenId) {
@@ -2051,6 +1865,12 @@ const R3Game = (() => {
 
     const cut = getCutoutFor(n);
     ctx.save();
+    // "Giro" (ver pickMovementPattern: solo comunes/poco comunes) —
+    // 100% visual, rota el retrato DENTRO del círculo recortado; como el
+    // círculo es simétrico, no cambia en nada dónde se le puede golpear.
+    if (mv && mv.spin) {
+      ctx.rotate(performance.now() / 1000 * mv.spinSpeed + mv.spinPhase);
+    }
     ctx.beginPath();
     ctx.arc(0, 0, n.size / 2, 0, Math.PI * 2);
     ctx.clip();
@@ -2288,9 +2108,11 @@ const R3Game = (() => {
 
   function drawFloatTexts() {
     ctx.textAlign = "center";
-    ctx.font = "700 20px 'Kalam', 'Segoe UI', sans-serif";
+    const bigFont = "700 20px 'Kalam', 'Segoe UI', sans-serif";
+    const smallFont = "600 14px 'Kalam', 'Segoe UI', sans-serif";
     for (const t of floatTexts) {
-      ctx.globalAlpha = Math.max(0, t.life);
+      ctx.font = t.small ? smallFont : bigFont;
+      ctx.globalAlpha = Math.max(0, t.life) * (t.small ? 0.85 : 1);
       ctx.fillStyle = t.color;
       ctx.fillText(t.text, t.x, t.y);
     }
@@ -2461,6 +2283,7 @@ const R3Game = (() => {
     legendariesSpawned = 0;
     activeThrowers = [];
     sessionKilledIds = new Set();
+    sessionKillDetails = new Map();
     lastFireAngle = -Math.PI / 2;
     lastAnnouncedWeaponTier = 0;
     spawnTimer = 600;
@@ -2475,10 +2298,6 @@ const R3Game = (() => {
       const key = it.rarityTier || "common";
       (tierBuckets[key] = tierBuckets[key] || []).push(it);
     }
-
-    // Fondo: se invalida el cache de la escena (ver ensureSceneCache) para
-    // que la primera partida siempre arranque dibujando de cero.
-    sceneCacheKey = "";
 
     // Avatar: siempre el r3tard menos raro de la colección.
     avatarItem = pickDefaultAvatarItem(collection);
@@ -2499,7 +2318,7 @@ const R3Game = (() => {
 
     onScoreChange(0, 0, 0);
     onLivesChange(lives);
-    onWaveChange(wave, THEMES[0].name);
+    onWaveChange(wave, themeName(THEMES[0]));
     onDifficultyChange(0, CFG.SPAWN_PROGRESSION.durationMinutes);
     onProgress(0, collection.length);
     R3Audio.setMusicIntensity(0);
@@ -2509,12 +2328,20 @@ const R3Game = (() => {
     rafId = requestAnimationFrame(loop);
   }
 
+  // Lista {tokenId, tierKey} de los r3tards distintos matados en ESTA
+  // partida — se manda tal cual a main.js en onGameOver, que a su vez la
+  // usa para armar la transacción recordMatch() (ver wallet.js) al
+  // terminar, con el código numérico de cada tier (R3_CONFIG.TIER_CHAIN_CODE).
+  function sessionKillDetailsArray() {
+    return Array.from(sessionKillDetails.entries()).map(([tokenId, tierKey]) => ({ tokenId, tierKey }));
+  }
+
   function endGame() {
     running = false;
     if (rafId) cancelAnimationFrame(rafId);
     R3Audio.stopMusic();
     R3Audio.gameOver();
-    onGameOver({ score, bestCombo, killsByTier, certifiedKills, wave, survivalMs: performance.now() - sessionStartTs, victory: false });
+    onGameOver({ score, bestCombo, killsByTier, certifiedKills, wave, survivalMs: performance.now() - sessionStartTs, victory: false, killedTokens: sessionKillDetailsArray() });
   }
 
   // Se llama cuando ya se mató al menos una vez a todos los r3tards
@@ -2526,7 +2353,7 @@ const R3Game = (() => {
     if (rafId) cancelAnimationFrame(rafId);
     R3Audio.stopMusic();
     R3Audio.victory();
-    onGameOver({ score, bestCombo, killsByTier, certifiedKills, wave, survivalMs: performance.now() - sessionStartTs, victory: true });
+    onGameOver({ score, bestCombo, killsByTier, certifiedKills, wave, survivalMs: performance.now() - sessionStartTs, victory: true, killedTokens: sessionKillDetailsArray() });
   }
 
   function stop() {

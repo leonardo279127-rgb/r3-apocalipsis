@@ -47,9 +47,20 @@ html, body {
 /* ---------------- MENÚ ---------------- */
 #screen-menu.active {
   display: flex;
-  align-items: center;
+  /* Bug real encontrado al probar el nuevo botón de idioma: en pantallas
+     no muy altas, el contenido del menú (título+vitrina+stats+wallet+
+     alias+tarjeta+cómo se juega+footer) ya era más alto que el viewport.
+     Con `align-items:center` a secas + overflow-y:auto, el navegador
+     SÍ vuelve la tarjeta desplazable, pero por cómo funciona el centrado
+     de flexbox recorta el lado de ARRIBA (el scroll no puede ir "negativo"
+     para alcanzarlo) — justo donde vive el botón 🌐 de idioma, quedando
+     IMPOSIBLE de tocar sin ningún aviso visual de que faltaba contenido.
+     `safe center` es el fix real: si no entra todo, cae a alinear desde
+     arriba (queda desplazable normal) en vez de recortar en silencio. */
+  align-items: safe center;
   justify-content: center;
   padding: 24px;
+  overflow-y: auto;
 }
 
 .menu-bg-fx {
@@ -79,6 +90,22 @@ html, body {
   backdrop-filter: blur(10px);
   box-shadow: 0 0 60px rgba(110, 84, 255,0.2), 0 14px 0 rgba(0,0,0,0.25);
   text-align: center;
+}
+
+/* Botón de idioma (ver js/i18n.js) — discreto, arriba a la derecha de la
+   tarjeta, para no competir con el título ni con los botones de acción
+   principales. Reusa el estilo .btn/.btn-secondary/.btn-small ya
+   existente, solo se reposiciona. */
+.lang-toggle-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  z-index: 2;
+}
+@media (max-width: 480px) {
+  .lang-toggle-btn { top: 10px; right: 10px; padding: 5px 10px; font-size: 0.76rem; }
 }
 
 .title {
@@ -488,10 +515,14 @@ html, body {
 /* ---------------- GAME OVER ---------------- */
 #screen-gameover.active {
   display: flex;
-  align-items: center;
+  /* Mismo fix que #screen-menu.active (ver comentario ahí, con la
+     explicación completa del bug de recorte por arriba) — esta pantalla
+     también puede tener más contenido del que entra en pantallas bajas. */
+  align-items: safe center;
   justify-content: center;
   padding: 24px;
   background: radial-gradient(circle at 50% 30%, rgba(110, 84, 255,0.18), var(--bg-void) 70%);
+  overflow-y: auto;
 }
 .gameover-title {
   font-family: 'Kalam', cursive, sans-serif;
@@ -638,6 +669,54 @@ html, body {
   font-size: 0.78rem;
   color: var(--text-dim);
   margin-top: 2px;
+}
+
+/* ---------------- COLECCIÓN (coleccion.html) ----------------
+   Reusa .kill-grid/.kill-card de logros.html. La única diferencia es
+   este modificador: aplicar un filter: grayscale/brightness al CARD
+   COMPLETO (no solo a la imagen) apaga de un jalón el borde de color de
+   rareza, la sombra y la imagen — el efecto "oscuro" que pidió el
+   usuario para los r3tards que todavía nadie ha matado (a nivel global,
+   on-chain). Los que sí murieron (evento TokenKilled) se quedan con
+   .kill-card normal, a todo color. */
+.kill-card-alive {
+  filter: grayscale(0.92) brightness(0.6);
+  opacity: 0.88;
+}
+.kill-card-status {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 7px;
+  margin-top: 4px;
+  letter-spacing: 0.3px;
+}
+.kill-card-status-dead { color: #ff8fa3; border: 1px solid #ff8fa3; }
+.kill-card-status-alive { color: var(--text-dim); border: 1px solid var(--line); }
+
+.tier-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin: 4px 0 18px;
+}
+.tier-filter-btn {
+  background: var(--ink);
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 16px;
+  font-size: 0.85rem;
+  font-family: 'Kalam', cursive, sans-serif;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.tier-filter-btn:hover { border-color: var(--line-strong); }
+.tier-filter-btn.active {
+  color: var(--paper);
+  border-color: var(--tier-color, var(--purple));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--tier-color, var(--purple)) 35%, transparent);
 }
 
 /* ---------------- ALIAS (menú) ---------------- */

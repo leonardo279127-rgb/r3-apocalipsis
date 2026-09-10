@@ -10,18 +10,23 @@ window.R3_ABIS = {
     "function paused() view returns (bool)",
     "event GamePaid(address indexed player, uint256 amountPaid, uint256 gameId, uint256 timestamp)",
 
-    // Ranking global y logros (guardados on-chain a propósito, ver
-    // contracts/R3Apocalipsis.sol y web/js/achievements-onchain.js).
+    // Ranking global, logros y r3tards cazados (guardados on-chain a
+    // propósito, ver contracts/R3Apocalipsis.sol y
+    // web/js/achievements-onchain.js). Las tres cosas se guardan juntas,
+    // en una sola transacción automática al terminar cada partida, con
+    // recordMatch() — ver web/js/wallet.js.
     "function setAlias(string newAlias)",
     "function playerAlias(address) view returns (string)",
-    "function submitScore(uint256 score)",
     "function bestScore(address) view returns (uint256)",
-    "function unlockAchievements(uint8[] ids)",
+    "function recordMatch(uint256 score, uint8[] newAchievementIds, uint256[] killedTokenIds, uint8[] killedTiers)",
     "function hasAchievement(address player, uint8 id) view returns (bool)",
     "function achievementsMask(address) view returns (uint256)",
+    "function isEverKilledGlobally(uint256 tokenId) view returns (bool)",
     "event AliasSet(address indexed player, string newAlias)",
     "event ScoreSubmitted(address indexed player, uint256 score, uint256 timestamp)",
     "event AchievementUnlocked(address indexed player, uint8 achievementId, uint256 timestamp)",
+    "event TokenKilled(uint256 indexed tokenId, address indexed firstKiller, uint8 tier, uint256 timestamp)",
+    "event MatchRecorded(address indexed player, uint256 score, uint256 newAchievements, uint256 newGlobalKills)",
 
     // Tarjeta de jugador (NFT ERC-721 intransferible) — ver
     // contracts/R3Apocalipsis.sol. Se mintea sola (gratis) la primera vez

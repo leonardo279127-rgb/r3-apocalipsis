@@ -30,7 +30,7 @@ window.R3_CONFIG = {
   // ---- Contrato del juego (TÚ debes desplegarlo y pegar la dirección aquí) ----
   // Ver README.md → "1) Desplegar el contrato". Hasta que pongas la dirección
   // real, el botón de jugar mostrará un aviso en vez de intentar cobrar.
-  GAME_CONTRACT_ADDRESS: "0x0000000000000000000000000000000000dEaD",
+  GAME_CONTRACT_ADDRESS: "0x512cC73be4e3398A54dDb9e3950BBD6088Dd3B95",
 
   // Número de bloque en el que quedó desplegado el contrato de arriba.
   // ranking.html y medallas.html lo usan como punto de partida para leer
@@ -42,7 +42,7 @@ window.R3_CONFIG = {
   // número de bloque real apenas despliegues el contrato (Remix te lo
   // muestra en los detalles de la transacción de deploy, o búscalo en
   // el explorador con la dirección del contrato).
-  GAME_CONTRACT_DEPLOY_BLOCK: 0,
+  GAME_CONTRACT_DEPLOY_BLOCK: 103742130,
 
   // Dirección que recibe los fondos al hacer withdraw() en el contrato.
   // Es solo informativa aquí (el contrato ya sabe quién es el owner),
@@ -117,12 +117,29 @@ window.R3_CONFIG = {
   // y el crecimiento de "poco común" en adelante se subieron a propósito
   // — SOLO "común" se queda igual de fácil siempre (es el tier "de
   // relleno", nunca debe sentirse injusto).
+  // NOTA i18n: cada tier YA NO trae un campo "label" propio — antes había
+  // TRES listas de nombres de rareza repetidas y traducidas cada una por
+  // su lado (esta de aquí, otra en main.js, otra en logros.html). Ahora
+  // hay una sola fuente de verdad bilingüe: R3I18N.tierLabel(key, opts)
+  // (ver js/i18n.js) — así que cualquier lugar que antes leía
+  // `tier.label` ahora llama a R3I18N.tierLabel("legendary") (o con
+  // {plural:true}/{upper:true} según haga falta) en su lugar.
   TIERS: [
     // percentil superior de "rarityScore" que cae en cada tier (0 = el más raro posible)
-    { key: "legendary", label: "LEGENDARIO", topPercent: 0.01, sizeMul: 4.0, hp: 16, hpGrowth: 16, points: 500, color: "#ffd166" },
-    { key: "epic", label: "ÉPICO", topPercent: 0.05, sizeMul: 2.6, hp: 10, hpGrowth: 9, points: 220, color: "#c77dff" },
-    { key: "rare", label: "RARO", topPercent: 0.15, sizeMul: 1.8, hp: 6, hpGrowth: 4.5, points: 100, color: "#5eead4" },
-    { key: "uncommon", label: "POCO COMÚN", topPercent: 0.40, sizeMul: 1.3, hp: 3, hpGrowth: 2, points: 40, color: "#7cc4ff" },
-    { key: "common", label: "COMÚN", topPercent: 1.00, sizeMul: 1.0, hp: 1, hpGrowth: 0.4, points: 15, color: "#c9c9d6" },
+    { key: "legendary", topPercent: 0.01, sizeMul: 4.0, hp: 16, hpGrowth: 16, points: 500, color: "#ffd166" },
+    { key: "epic", topPercent: 0.05, sizeMul: 2.6, hp: 10, hpGrowth: 9, points: 220, color: "#c77dff" },
+    { key: "rare", topPercent: 0.15, sizeMul: 1.8, hp: 6, hpGrowth: 4.5, points: 100, color: "#5eead4" },
+    { key: "uncommon", topPercent: 0.40, sizeMul: 1.3, hp: 3, hpGrowth: 2, points: 40, color: "#7cc4ff" },
+    { key: "common", topPercent: 1.00, sizeMul: 1.0, hp: 1, hpGrowth: 0.4, points: 15, color: "#c9c9d6" },
   ],
+
+  // Código numérico de cada tier, SOLO para mandarlo al contrato en
+  // recordMatch() (killedTiers) — Solidity no entiende strings como
+  // "legendary", necesita un número chico (uint8). Estos números quedan
+  // PARA SIEMPRE una vez que el contrato esté desplegado y alguien haya
+  // matado un r3tard con ellos: si el día de mañana se agrega un tier
+  // nuevo, se le pone el próximo número libre (5, 6...) y estos 5 NUNCA
+  // se reordenan ni reasignan (mismo principio que los ids de logros en
+  // achievements-onchain.js).
+  TIER_CHAIN_CODE: { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 },
 };
