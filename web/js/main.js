@@ -30,6 +30,9 @@
   const aliasCurrent = el("alias-current");
   const aliasInput = el("alias-input");
   const btnSaveAlias = el("btn-save-alias");
+  const cardRow = el("card-row");
+  const cardStatus = el("card-status");
+  const btnMintCard = el("btn-mint-card");
 
   const goAchievementsEarned = el("go-achievements-earned");
   const goAchievementsList = el("go-achievements-list");
@@ -120,7 +123,9 @@
   if (!testMode) {
     try {
       const priceWei = await R3Wallet.getPlayPrice();
-      priceText = `${ethers.formatEther(priceWei)} MON`;
+      // Si el owner puso el precio en 0 (juego gratis, solo gas), se
+      // muestra "Gratis" en vez del feo "0.0 MON".
+      priceText = priceWei === 0n ? "Gratis" : `${ethers.formatEther(priceWei)} MON`;
     } catch (err) {
       console.warn("No se pudo leer playPrice() todavía:", err);
     }
@@ -146,6 +151,7 @@
   async function refreshAliasUI(addr) {
     if (testMode || !addr) {
       aliasRow.hidden = true;
+      cardRow.hidden = true;
       return;
     }
     aliasRow.hidden = false;
@@ -157,7 +163,55 @@
     }
     aliasCurrent.textContent = currentAlias ? `Alias actual: "${currentAlias}"` : "Todavía no tienes alias";
     aliasInput.value = currentAlias;
+    await refreshCardUI(addr);
   }
+
+  async function refreshCardUI(addr) {
+    if (testMode || !addr) {
+      cardRow.hidden = true;
+      return;
+    }
+    cardRow.hidden = false;
+    try {
+      const owns = await R3Wallet.hasCard(addr);
+      cardStatus.textContent = owns ? "🪪 Ya tienes tu tarjeta de jugador (NFT)" : "Todavía no tienes tu tarjeta";
+      btnMintCard.hidden = owns;
+    } catch (err) {
+      console.warn("No se pudo leer hasCard() on-chain:", err);
+    }
+  }
+
+  /** Muestra un aviso especial la primera vez que un tx mintea la tarjeta
+   * (llamado tras setAlias/submitScore/unlockAchievements/mintCard). */
+  function announceCardIfMinted(receipt) {
+    if (R3Wallet.wasCardMinted(receipt)) {
+      toast("🪪 ¡Conseguiste tu Tarjeta de Jugador (NFT)! Se actualiza sola con tu progreso — no se puede vender ni transferir.", 5200);
+      const addr = R3Wallet.getAddress();
+      if (addr) refreshCardUI(addr);
+    }
+  }
+
+  btnMintCard.addEventListener("click", async () => {
+    R3Audio.uiClick();
+    const addr = R3Wallet.getAddress();
+    if (!addr) {
+      showMenuError("Conecta tu wallet primero.");
+      return;
+    }
+    btnMintCard.disabled = true;
+    toast("Confirma la transacción en tu wallet…", 6000);
+    try {
+      const receipt = await R3Wallet.mintCard();
+      announceCardIfMinted(receipt);
+      await refreshCardUI(addr);
+    } catch (err) {
+      console.error(err);
+      const msg = /user rejected|denied/i.test(err.message || "") ? "Cancelaste la transacción." : err.message || "No se pudo mintear la tarjeta.";
+      showMenuError(msg);
+    } finally {
+      btnMintCard.disabled = false;
+    }
+  });
 
   btnSaveAlias.addEventListener("click", async () => {
     R3Audio.uiClick();
@@ -174,10 +228,11 @@
     btnSaveAlias.disabled = true;
     toast("Confirma la transacción en tu wallet…", 6000);
     try {
-      await R3Wallet.setPlayerAlias(value);
+      const receipt = await R3Wallet.setPlayerAlias(value);
       currentAlias = value;
       aliasCurrent.textContent = `Alias actual: "${value}"`;
       toast("¡Alias guardado! Ya aparece así en el ranking.", 2600);
+      announceCardIfMinted(receipt);
     } catch (err) {
       console.error(err);
       const msg = /user rejected|denied/i.test(err.message || "") ? "Cancelaste la transacción." : err.message || "No se pudo guardar el alias.";
@@ -274,8 +329,9 @@
     btnSaveScore.disabled = true;
     goOnchainStatus.textContent = "Confirma la transacción en tu wallet…";
     try {
-      await R3Wallet.submitScore(lastGameOverSummary.score);
+      const receipt = await R3Wallet.submitScore(lastGameOverSummary.score);
       goOnchainStatus.textContent = "¡Puntaje guardado en el ranking global!";
+      announceCardIfMinted(receipt);
     } catch (err) {
       console.error(err);
       const msg = /user rejected|denied/i.test(err.message || "")
@@ -295,13 +351,13 @@
     btnSaveAchievements.disabled = true;
     goOnchainStatus.textContent = "Confirma la transacción en tu wallet…";
     try {
-      await R3Wallet.unlockAchievementsOnChain(lastNewAchievementIds);
-      const addr = R3Wallet.getAddress();
+      const receipt = await R3Wallet.unlockAchievementsOnChain(lastNewAchievementIds);
       achievementsMaskCache = null; // se relee fresco la próxima vez
       goOnchainStatus.textContent = `¡${lastNewAchievementIds.length} logro(s) guardado(s)! Ya se ven en tus medallas.`;
       lastNewAchievementIds = [];
       btnSaveAchievements.textContent = "🎖️ Guardar logros nuevos";
       btnSaveAchievements.disabled = true;
+      announceCardIfMinted(receipt);
     } catch (err) {
       console.error(err);
       const msg = /user rejected|denied/i.test(err.message || "") ? "Cancelaste la transacción." : err.message || "No se pudieron guardar los logros.";
@@ -488,13 +544,25 @@
       hudScore.textContent = score.toLocaleString("es");
     },
     onLivesChange: (lives) => {
-      // Cada vida es el logo de Monad (web/assets/monad-orb.svg) — las que
-      // ya perdiste se muestran apagadas/en gris en vez de desaparecer,
-      // así siempre se ve cuántas vidas máximas hay (CFG.MAX_LIVES).
+      // Cada vida es el logo de Monad (web/assets/monad-logo.png) — las
+      // que ya perdiste se muestran apagadas/en gris en vez de
+      // desaparecer, así siempre se ve cuántas vidas máximas hay
+      // (CFG.MAX_LIVES). Matar un raro/épico/legendario puede dar vidas
+      // "a medias" (ej. +1.5 por un épico), así que una vida a medio
+      // llenar se dibuja como medio logo encendido sobre el apagado.
       let html = "";
       for (let i = 0; i < CFG.MAX_LIVES; i++) {
-        const lost = i >= lives;
-        html += `<img class="life-icon${lost ? " life-icon-lost" : ""}" src="assets/monad-orb.svg" alt="vida" />`;
+        const filled = i + 1 <= lives;
+        const half = !filled && i < lives;
+        if (half) {
+          html +=
+            `<span class="life-icon-wrap">` +
+            `<img class="life-icon life-icon-lost" src="assets/monad-logo.png" alt="" />` +
+            `<img class="life-icon life-icon-half-fill" src="assets/monad-logo.png" alt="media vida" />` +
+            `</span>`;
+        } else {
+          html += `<img class="life-icon${filled ? "" : " life-icon-lost"}" src="assets/monad-logo.png" alt="vida" />`;
+        }
       }
       hudLives.innerHTML = html;
     },
@@ -521,6 +589,7 @@
       if (info.big) spawnBanner(info);
     },
     onDamageBuff: (mult) => spawnDamageBanner(mult),
+    onWeaponUnlock: (meta) => spawnWeaponBanner(meta),
     onProgress: (killedCount, total) => {
       lastProgressText = `${killedCount}/${total}`;
       hudProgress.textContent = lastProgressText;
@@ -559,12 +628,14 @@
 
   // Log en vivo (transparente) de los r3tards que vas matando, más
   // reciente arriba. Se limita a las últimas líneas para no acumular
-  // miles de nodos DOM en una partida larga.
+  // miles de nodos DOM en una partida larga. Pedido explícito: nada de
+  // texto redundante (ni "r3tards", ni el nombre) — solo el número, la
+  // rareza (con su propio color) y los puntos.
   const KILL_LOG_MAX = 14;
   function appendKillLog(info) {
     const line = document.createElement("div");
     line.className = "kill-log-line kill-log-" + info.tierKey;
-    line.innerHTML = `<span class="kill-log-tier">${info.tierLabel}</span> r3tards #${info.tokenId} · <span class="kill-log-name">${info.name}</span> <span class="kill-log-pts">+${info.points}</span>`;
+    line.innerHTML = `#${info.tokenId} · <span class="kill-log-tier" style="color:${info.color}">${info.tierLabel}</span> · <span class="kill-log-pts">+${info.points}</span>`;
     killLog.prepend(line);
     while (killLog.children.length > KILL_LOG_MAX) {
       killLog.removeChild(killLog.lastChild);
@@ -610,6 +681,18 @@
     b.className = "rare-banner";
     b.style.color = "#ffd166";
     b.innerHTML = `¡DAÑO x${mult} DESBLOQUEADO!<br><span style="font-size:0.6em">Tus disparos ahora hacen ${mult}x de daño</span>`;
+    bannerLayer.appendChild(b);
+    setTimeout(() => b.remove(), 2300);
+  }
+
+  // Se dispara al desbloquear un arma nueva (ver WEAPON_TIER_META en
+  // game.js: épico → 1° legendario → 5° legendario → 10° legendario).
+  function spawnWeaponBanner(meta) {
+    R3Audio.waveUp();
+    const b = document.createElement("div");
+    b.className = "rare-banner";
+    b.style.color = "#8f7bff";
+    b.innerHTML = `¡NUEVA ARMA: ${meta.label.toUpperCase()}!<br><span style="font-size:0.6em">Ráfaga x${meta.burst} — ${meta.burst} logos de Monad por disparo</span>`;
     bannerLayer.appendChild(b);
     setTimeout(() => b.remove(), 2300);
   }

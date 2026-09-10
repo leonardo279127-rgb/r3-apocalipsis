@@ -1,6 +1,6 @@
 # R3 APOCALIPSIS
 
-Juego on-chain sobre la colección **r3tards** (Monad Mainnet). Los jugadores conectan su wallet, pagan **10 MON** por partida y disparan el orbe de Monad contra los NFTs que van cayendo — entre más raro es el NFT, más grande, más resistente y más puntos vale.
+Juego on-chain sobre la colección **r3tards** (Monad Mainnet). Los jugadores conectan su wallet, juegan **gratis** (solo pagan el gas normal de la red, sin costo extra por partida — ver sección 7.13) y disparan el logo de Monad contra los NFTs que van cayendo — entre más raro es el NFT, más grande, más resistente y más puntos vale.
 
 Esta guía asume que **no tienes experiencia con hosting ni con despliegue de contratos**. Ve paso a paso, en orden. No necesitas instalar nada en tu computadora.
 
@@ -8,7 +8,7 @@ Esta guía asume que **no tienes experiencia con hosting ni con despliegue de co
 
 ## 0) Lo que ya está listo
 
-- `contracts/R3Apocalipsis.sol` → el contrato que cobra la entrada (10 MON), guarda los fondos hasta que tú los retiras, y guarda alias/puntajes/logros globales (ver sección 7.10).
+- `contracts/R3Apocalipsis.sol` → el contrato del juego: cada partida arranca **gratis** (`playPrice = 0`, ver sección 7.13 — tú puedes subirlo cuando quieras con `setPlayPrice()`, sin volver a desplegar nada), guarda los fondos hasta que tú los retiras (si algún día cobras algo), y guarda alias/puntajes/logros globales (ver sección 7.10).
 - `web/` → el sitio completo del juego (HTML/CSS/JS). Es un sitio **estático**: no necesita servidor, base de datos ni backend. Por eso se puede alojar gratis y "siempre activo" en GitHub Pages. Incluye `index.html` (el juego), `logros.html` (tus kills en este navegador), `ranking.html` (top de puntajes global, on-chain) y `medallas.html` (logros globales, on-chain).
 - `tools/` → el script que precarga la colección (`build-collection.mjs`) para que el juego arranque al instante en vez de leer la cadena cada vez.
 - `.github/workflows/deploy.yml` → hace que lo anterior pase **solo, automáticamente**, cada vez que subes archivos: genera la precarga y publica el sitio, sin que tengas que correr nada en tu computadora (paso 4).
@@ -25,8 +25,9 @@ Yo no puedo desplegar el contrato por ti — desplegar significa firmar una tran
 
 1. Abre **https://remix.ethereum.org**
 2. En el panel izquierdo (ícono de carpeta), crea un archivo nuevo llamado `R3Apocalipsis.sol` y pega adentro **todo** el contenido del archivo `contracts/R3Apocalipsis.sol` de esta carpeta.
-3. Ve a la pestaña **Solidity Compiler** (ícono de "S"). Elige la versión `0.8.24` (o cualquier `0.8.2x`) y dale clic a **Compile R3Apocalipsis.sol**.
-   - Remix descargará automáticamente las dependencias de OpenZeppelin (`@openzeppelin/contracts`) — es normal, tómalo un momento.
+3. Ve a la pestaña **Solidity Compiler** (ícono de "S"). Elige la versión `0.8.24` (o cualquier `0.8.2x`).
+   - Remix descargará automáticamente las dependencias de OpenZeppelin (`@openzeppelin/contracts@5.1.0`, la versión exacta que ya viene escrita en los `import` del contrato — no la cambies, ver el comentario junto a esos imports en el propio archivo) — es normal, tómalo un momento.
+   - **Importante, antes de compilar**: abre **"Advanced Configurations"** (debajo del selector de versión) y activa **"Enable optimization"** (200 runs está bien) Y **"Enable viaIR"**. El contrato genera la imagen de la tarjeta de jugador (sección 7.11) armando texto dentro de Solidity, y sin `viaIR` el compilador se queja de "Stack too deep". Con ambas cosas activadas, dale clic a **Compile R3Apocalipsis.sol**.
 4. Ve a la pestaña **Deploy & Run Transactions** (ícono de Ethereum).
    - En **Environment**, elige **"Injected Provider - MetaMask"** (o el nombre de tu wallet). Se abrirá tu wallet pidiendo conectar — acéptalo.
    - **Verifica que tu wallet esté en la red Monad Mainnet (chainId 143)** antes de continuar. Si no la tienes agregada, en el paso 3 de la parte web el sitio te la agrega automáticamente, pero para desplegar el contrato necesitas tenerla ya en tu wallet — agrégala manualmente si hace falta con estos datos:
@@ -303,6 +304,53 @@ Ninguna de las dos necesita servidor: ambas leen los eventos directo de un RPC p
 **Aviso importante para el despliegue**: como estos cambios están en el contrato (no solo en el sitio) y **todavía no lo has desplegado**, esta es tu única oportunidad de tener el ranking/logros desde el primer despliegue — si ya lo hubieras desplegado antes, necesitarías desplegar un contrato NUEVO (con una dirección distinta) para agregar esto después, y los datos de pago del contrato viejo no se transferirían solos. Sigue la sección 1 de este README normalmente; ya incluye este contrato actualizado.
 
 **Misma limitación honesta que ya existía** (ver "Checklist de seguridad", sección 6): como no hay servidor que valide que una partida fue real, alguien técnico podría llamar `submitScore()`/`unlockAchievements()` directo desde la consola del navegador con números inventados, sin haber jugado. No hay forma de cerrar esto al 100% sin un backend propio (fuera del alcance de este proyecto). Como no hay ningún premio en dinero ligado al puntaje o a los logros, el peor caso es alguien mintiendo sobre su propio historial en un juego gratis de ver — no hay forma de robar fondos ni de afectar a otros jugadores con esto.
+
+## 7.11) Tarjeta de jugador — un NFT intransferible que se completa solo
+
+Preguntaste si esto "necesita mintear un NFT", con la idea de que si un jugador vuelve a jugar, el juego encuentre su NFT anterior y lo vaya completando. Es exactamente lo que se implementó, con dos decisiones que confirmaste antes de tocar el contrato: que la tarjeta quede **ligada para siempre a tu wallet** (no se puede vender ni transferir) y que mintearla sea **gratis** (solo el gas normal, sin cobro aparte).
+
+**Cómo funciona**: la primera vez que guardas un alias, un puntaje o un logro (sección 7.10), el contrato mintea automáticamente — sin que tengas que hacer nada aparte — una tarjeta (NFT ERC-721) a tu nombre. También puedes mintearla a mano desde el menú con el botón "🪪 Mintear mi tarjeta (gratis)" si quieres tenerla antes de guardar cualquier otra cosa. Cada wallet tiene como mucho UNA tarjeta — no se mintea una nueva cada vez que mejoras tu récord. En vez de eso, la imagen y los datos de esa misma tarjeta se generan al momento en que alguien la consulta (en tu propia wallet, en Monadscan, en cualquier explorador de NFTs), leyendo en ese instante tu alias/mejor puntaje/cantidad de logros actuales — así que la próxima vez que juegues y mejores tu marca, la MISMA tarjeta ya se ve distinta, sin mintear otra ni pagar nada extra. Es justo el "busca el NFT anterior y completa la información" que describiste.
+
+**Por qué es intransferible (soulbound)**: si se pudiera vender, alguien podría comprar una tarjeta con puntaje/logros altos sin haber jugado nada — el historial que muestra dejaría de significar algo. Por eso el contrato bloquea cualquier `transferFrom`/`safeTransferFrom`/`approve`/`setApprovalForAll` sobre estas tarjetas (revierten con un mensaje claro). Siempre va a aparecer en tu wallet como tuya, nunca se puede regalar ni mover.
+
+**Qué muestra la tarjeta**: una imagen simple generada 100% on-chain (sin depender de ningún servidor ni imagen externa) con tu alias, tu mejor puntaje y cuántos logros llevas desbloqueados — en el estilo visual del sitio. Puedes verla conectando tu wallet a cualquier explorador de NFTs compatible con Monad, o consultando `tokenURI()` directamente en Monadscan.
+
+**Verificación**: se probó en la misma cadena local (Hardhat) de la sección 7.10, con casos específicos para el NFT — que se mintea solo la primera vez y NUNCA una segunda vez para la misma wallet (sin importar cuántas veces guardes alias/puntaje/logros después); que `mintCard()` a mano funciona y no falla si ya tenías una; que la tarjeta decodificada (`tokenURI()`) muestra correctamente tu alias, tu puntaje y tu cantidad de logros, y que esos datos CAMBIAN solos en la misma tarjeta después de jugar más y guardar un puntaje/logro nuevo; y que intentar transferirla, aprobarla, o transferirla con `safeTransferFrom` revierte siempre. Todo pasó.
+
+**Nota técnica sobre la versión de OpenZeppelin**: el contrato fija la versión `@5.1.0` de OpenZeppelin en sus propios `import` (en vez de dejar que Remix baje "la última"). Las versiones más nuevas (5.6+) usan un opcode de Ethereum relativamente reciente (`MCOPY`, de la actualización "Cancun") en utilidades que este contrato necesita, y no hay forma de confirmar con certeza que Monad Mainnet ya lo soporte — fijar 5.1.0 evita ese riesgo por completo. Si en algún momento quieres actualizar la versión de OpenZeppelin, confirma primero que Monad soporte Cancun.
+
+## 7.12) Log de kills más discreto, vidas por rareza, arma que sube de nivel y el logo real de Monad
+
+Esta ronda es **100% de sitio web (frontend)** — no se tocó el contrato para nada, así que no hace falta volver a desplegar nada en Remix ni cambiar ninguna dirección en `config.js`. Solo hay que subir los archivos actualizados de `web/` (los mismos pasos de siempre de la sección 4, GitHub Pages).
+
+**Log de kills, más chico y sin redundancia**: el cuadro semitransparente de la esquina inferior izquierda que iba mostrando cada r3tard que matabas decía cosas como "LEGENDARIO r3tards #38 · Cranium +980" — se simplificó a solo lo esencial: `#38 · LEGENDARIO · +980`, con la palabra de rareza pintada del mismo color que usa esa rareza en el resto del juego (dorado para legendario, morado para épico, etc.). También se hizo más chico y más transparente (menos protagonismo, para que estorbe menos mientras juegas).
+
+**Vidas por matar algo raro de verdad**: antes las vidas solo se perdían, nunca se recuperaban. Ahora matar un **raro** te devuelve **+1 vida**, un **épico** te da **+1.5 vidas**, y un **legendario** te **rellena la barra completa** (las 5 de golpe) — común y poco común no dan nada, para que siga siendo la rareza la que importa. Aparece un textito flotante ("+1 vida", "¡VIDA AL MÁXIMO!") en el momento que pasa, y el ícono de la vida a medias (por el +1.5 del épico) se dibuja como medio logo de Monad encendido.
+
+**El logo real de Monad**: hasta ahora el juego usaba una marca abstracta propia (una esfera morada con un garabato, aclarada en el propio código como "no es el logo oficial de Monad") para los disparos y las vidas del HUD. Ahora usa el logo real que nos diste (`web/assets/monad-logo.png`) en los disparos del jugador, en los íconos de vida del HUD, y en el ataque de Keone/James (ver abajo).
+
+**Keone y James "spamean" el logo de Monad**: estas dos piezas con nombre propio de la colección, en vez de tirarte fruta o basura como el resto de épicos/legendarios, te lanzan el logo de Monad una y otra vez, mucho más seguido que cualquier otro enemigo — funciona sin importar en qué rareza real haya caído esa pieza específica.
+
+**Fondo y aura según los rasgos reales de cada r3tard**: el resplandor ("aura") alrededor de cada r3tard que cae, y el tinte de color del fondo de la partida, ahora salen de los rasgos **"Background"** y **"Aura"** propios de la metadata de esa pieza (si la colección los trae) en vez de un esquema de colores inventado por nosotros — así cada pieza se ve como la definieron sus propios atributos. Si una pieza no tiene esos rasgos, se usa el color de respaldo de siempre (por rareza / por oleada), así nunca se ve sin color.
+
+**Arma que sube de nivel, con los sprites que nos diste**: el avatar ahora sostiene un arma que se va actualizando sola según tus kills DE ESTA PARTIDA, siempre pegada y ajustada a su tamaño, apuntando hacia donde disparaste por última vez:
+
+- Matar tu primer **épico** te da la pistola (la última del set de sprites) — **ráfaga de 2** disparos por clic.
+- Matar tu **1er legendario** te da el revólver (la primera del set) — **ráfaga de 3**.
+- Matar tu **5° legendario** te da el subfusil (la tercera del set) — **ráfaga de 4**.
+- Matar tu **10° legendario** te da el rifle (la segunda del set) — **ráfaga de 5**.
+
+Cada disparo sigue lanzando el logo de Monad (ahora varios a la vez, en abanico angosto hacia donde apuntaste). El arma solo puede subir de nivel, nunca baja, y un banner grande avisa cada vez que subes ("¡NUEVA ARMA: REVÓLVER!", etc.) — igual que el aviso de "daño desbloqueado" que ya existía. Como todo lo demás de esta sección, se reinicia cada partida nueva.
+
+**Verificación**: se probó cargando el juego con una colección de prueba (con rasgos "Background"/"Aura" variados, y piezas "Keone"/"James" certificadas) y jugando muchas rondas automatizadas — se confirmó que las vidas suben correctamente por rareza, que las 4 armas se desbloquean en el orden y con la ráfaga correcta, que los banners de Keone/James aparecen con su nombre propio, y que no aparece ningún error nuevo en la consola del navegador.
+
+## 7.13) El juego ahora arranca gratis (0 MON por partida)
+
+Pediste hacerlo gratis. Antes `playPrice` arrancaba en 10 MON; ahora el contrato arranca con **`playPrice = 0`** — jugar solo cuesta el gas normal de la transacción `playGame()` (una fracción mínima de MON que se paga a la red, no al contrato), igual que cualquier otra transacción en Monad. El resto del cobro (`require(msg.value == playPrice)`, retiro de fondos, etc.) sigue funcionando exactamente igual, simplemente con el precio en cero.
+
+El sitio ya se ajusta solo: donde antes se veía "🎮 Jugar (10 MON)" ahora dice "🎮 Jugar (Gratis)", leyendo siempre `playPrice()` en vivo del contrato — no hay ningún número de precio "hardcodeado" en el frontend que haya que ir a cambiar.
+
+Si más adelante quieres volver a cobrar algo (por ejemplo, para financiar premios del ranking), no hace falta desplegar de nuevo: tú (el owner) puedes llamar `setPlayPrice(nuevoPrecio)` directamente desde Remix o Monadscan en cualquier momento, y el sitio lo reflejará solo en la siguiente visita.
 
 ## 8) Ideas para una v2 (no incluidas todavía)
 

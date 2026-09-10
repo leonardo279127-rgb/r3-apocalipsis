@@ -60,6 +60,15 @@
         <button id="btn-save-alias" class="btn btn-secondary btn-small">💾 Guardar alias</button>
       </div>
 
+      <!-- Tarjeta de jugador: un NFT intransferible (no se vende ni se
+           regala) que se mintea solo, gratis, la primera vez que guardas
+           un alias/puntaje/logro — o aquí mismo a mano. Se "completa
+           sola": la misma tarjeta va mostrando tu progreso más reciente. -->
+      <div id="card-row" class="alias-row" hidden>
+        <span class="alias-current" id="card-status">Todavía no tienes tu tarjeta</span>
+        <button id="btn-mint-card" class="btn btn-secondary btn-small">🪪 Mintear mi tarjeta (gratis)</button>
+      </div>
+
       <p id="menu-error" class="menu-error" hidden></p>
       <button id="btn-retry-collection" class="btn btn-secondary" hidden>🔄 Reintentar carga de la colección</button>
 

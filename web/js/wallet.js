@@ -187,6 +187,57 @@ const R3Wallet = (() => {
     return await contract.achievementsMask(address);
   }
 
+  // ------------------------------------------------------------------
+  // Tarjeta de jugador (NFT ERC-721 intransferible) — se mintea SOLA y
+  // GRATIS (solo el gas) la primera vez que se guarda un alias, puntaje o
+  // logro (ver setAlias/submitScore/unlockAchievements en el contrato).
+  // mintCard() de aquí abajo es solo para quien la quiera mintear a mano,
+  // antes de haber guardado cualquiera de esas tres cosas.
+  // ------------------------------------------------------------------
+
+  /** Mintea tu tarjeta directamente. Gratis (solo gas). No falla si ya la tenías. */
+  async function mintCard() {
+    requireReadyContract();
+    await ensureMonadNetwork();
+    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, signer);
+    const tx = await contract.mintCard();
+    return await tx.wait();
+  }
+
+  /** ¿Esta wallet ya tiene su tarjeta minteada? (solo lectura) */
+  async function hasCard(address) {
+    if (!isContractConfigured()) return false;
+    const provider = browserProvider || new ethers.BrowserProvider(window.ethereum);
+    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, provider);
+    return await contract.hasCard(address);
+  }
+
+  /** El tokenId que le corresponde a una wallet (exista ya la tarjeta o no). */
+  async function tokenIdOf(address) {
+    if (!isContractConfigured()) return null;
+    const provider = browserProvider || new ethers.BrowserProvider(window.ethereum);
+    const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, ABIS.GAME, provider);
+    return await contract.tokenIdOf(address);
+  }
+
+  /**
+   * Revisa el recibo de CUALQUIER transacción de este contrato (setAlias,
+   * submitScore, unlockAchievements, mintCard) y dice si esa transacción
+   * en particular acabó minteando la tarjeta (primera vez para esa
+   * wallet). Útil para mostrar un aviso especial solo esa vez.
+   */
+  function wasCardMinted(receipt) {
+    if (!receipt || !receipt.logs) return false;
+    const iface = new ethers.Interface(ABIS.GAME);
+    return receipt.logs.some((log) => {
+      try {
+        return iface.parseLog(log)?.name === "CardMinted";
+      } catch {
+        return false;
+      }
+    });
+  }
+
   return {
     hasInjectedWallet,
     isContractConfigured,
@@ -201,6 +252,10 @@ const R3Wallet = (() => {
     getBestScore,
     unlockAchievementsOnChain,
     getAchievementsMask,
+    mintCard,
+    hasCard,
+    tokenIdOf,
+    wasCardMinted,
   };
 })();
 

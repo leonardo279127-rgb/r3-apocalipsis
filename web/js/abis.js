@@ -22,6 +22,15 @@ window.R3_ABIS = {
     "event AliasSet(address indexed player, string newAlias)",
     "event ScoreSubmitted(address indexed player, uint256 score, uint256 timestamp)",
     "event AchievementUnlocked(address indexed player, uint8 achievementId, uint256 timestamp)",
+
+    // Tarjeta de jugador (NFT ERC-721 intransferible) — ver
+    // contracts/R3Apocalipsis.sol. Se mintea sola (gratis) la primera vez
+    // que se guarda un alias/puntaje/logro, o a mano con mintCard().
+    "function mintCard()",
+    "function hasCard(address player) view returns (bool)",
+    "function tokenIdOf(address player) pure returns (uint256)",
+    "function tokenURI(uint256 tokenId) view returns (string)",
+    "event CardMinted(address indexed player, uint256 indexed tokenId)",
   ],
 
   ERC721: [

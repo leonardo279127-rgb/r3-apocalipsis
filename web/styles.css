@@ -273,6 +273,22 @@ html, body {
   opacity: 0.28;
   filter: grayscale(1) brightness(0.6);
 }
+/* Vida "a medias" (ej. +1.5 al matar un épico): un logo apagado de base
+   con la mitad izquierda de un logo encendido encima, recortada con
+   clip-path — se nota de un vistazo que esa vida quedó a medio llenar. */
+.life-icon-wrap {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  display: inline-block;
+}
+.life-icon-wrap .life-icon {
+  position: absolute;
+  inset: 0;
+}
+.life-icon-half-fill {
+  clip-path: inset(0 50% 0 0);
+}
 .hud-combo {
   font-size: 0.92rem;
   color: #ffd166;
@@ -297,19 +313,18 @@ html, body {
   font-family: 'Kalam', cursive, sans-serif;
 }
 .kill-log-line {
-  background: var(--ink-soft);
-  border: 2px solid var(--line);
+  background: rgba(11, 7, 16, 0.4);
+  border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 0.78rem;
-  line-height: 1.35;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   animation: killLogIn 0.2s ease;
 }
-.kill-log-tier { font-weight: 700; margin-right: 3px; }
-.kill-log-name { color: var(--text-dim); }
+.kill-log-tier { font-weight: 700; }
 .kill-log-pts { color: #ffd166; font-weight: 700; }
 .kill-log-rare, .kill-log-epic, .kill-log-legendary { border-color: #ffd166; }
 @keyframes killLogIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }

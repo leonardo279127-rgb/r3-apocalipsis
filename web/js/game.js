@@ -57,6 +57,10 @@ const R3Game = (() => {
   let keyRight = false;
   const AVATAR_KEY_SPEED = 620; // px/s moviéndose con teclado (flechas o A/D)
 
+  // ---- Progresión de arma (ver WEAPON_TIER_META/currentWeaponTier) ----
+  let lastFireDir = 1; // -1/1 — hacia dónde apuntó el último disparo, para reflejar el arma
+  let lastAnnouncedWeaponTier = 0; // último tier ya avisado con el banner, no repetir el aviso
+
   // ---- Fondo dinámico: la imagen de un r3tard real de fondo, que va
   // cambiando de menos raro a más raro a medida que avanza la partida.
   let bgSortedList = []; // [...collection] ordenada de menos a más rara
@@ -73,6 +77,7 @@ const R3Game = (() => {
   ];
 
   let monadOrbImg = null;
+  const weaponImgs = {}; // imgKey -> HTMLImageElement (ver WEAPON_TIER_META)
 
   let onScoreChange = () => {};
   let onLivesChange = () => {};
@@ -82,12 +87,38 @@ const R3Game = (() => {
   let onNftTag = () => {}; // cuadro de texto flotante (DOM) al caer un NFT
   let onKill = () => {}; // se llama en cada NFT eliminado (para logros)
   let onDamageBuff = () => {}; // se llama cuando el daño del jugador sube (tras matar legendarios)
+  let onWeaponUnlock = () => {}; // se llama al desbloquear un arma nueva (ver WEAPON_TIER_META)
   let onProgress = () => {}; // se llama con (distintosMatados, total) cada vez que sube el contador
 
   function damageMultiplier() {
     if (legendaryKills <= 0) return 1;
     if (legendaryKills === 1) return 2;
     return 3; // tope: matar más legendarios ya no sigue subiendo el daño
+  }
+
+  /**
+   * Progresión de arma — pedido explícito del usuario: matar un épico
+   * da la última pistola del set (ráfaga de 2); el 1er legendario da la
+   * primera (ráfaga de 3); el 5° legendario da la tercera (ráfaga de
+   * 4); el 10° legendario da la segunda (ráfaga de 5). Se calcula
+   * siempre a partir de killsByTier (no hay estado aparte que
+   * desincronizar), así que solo puede subir de nivel, nunca bajar.
+   */
+  const WEAPON_TIER_META = [
+    null, // tier 0: sin arma todavía, disparo simple (el de siempre)
+    { imgKey: "epic", burst: 2, label: "Pistola" },
+    { imgKey: "legendary1", burst: 3, label: "Revólver" },
+    { imgKey: "legendary5", burst: 4, label: "Subfusil" },
+    { imgKey: "legendary10", burst: 5, label: "Rifle" },
+  ];
+  function currentWeaponTier() {
+    const legKills = killsByTier.legendary || 0;
+    const epicKills = killsByTier.epic || 0;
+    if (legKills >= 10) return 4;
+    if (legKills >= 5) return 3;
+    if (legKills >= 1) return 2;
+    if (epicKills >= 1) return 1;
+    return 0;
   }
 
   function init(canvasEl, callbacks) {
@@ -101,10 +132,22 @@ const R3Game = (() => {
     onNftTag = callbacks.onNftTag || onNftTag;
     onKill = callbacks.onKill || onKill;
     onDamageBuff = callbacks.onDamageBuff || onDamageBuff;
+    onWeaponUnlock = callbacks.onWeaponUnlock || onWeaponUnlock;
     onProgress = callbacks.onProgress || onProgress;
 
+    // Logo real de Monad (el que mandó el usuario) — se usa para el
+    // disparo del jugador, las vidas del HUD y el ataque "spam" de
+    // Keone/James (ver drawProjectile/drawEnemyThrow más abajo).
     monadOrbImg = new Image();
-    monadOrbImg.src = "assets/monad-orb.svg";
+    monadOrbImg.src = "assets/monad-logo.png";
+
+    // Sprites de arma que manda el usuario (ver WEAPON_TIER_META) — se
+    // van desbloqueando según la progresión de kills de esta partida.
+    for (const key of ["epic", "legendary1", "legendary5", "legendary10"]) {
+      const img = new Image();
+      img.src = `assets/weapons/w-${key}.png`;
+      weaponImgs[key] = img;
+    }
 
     resize();
     window.addEventListener("resize", resize);
@@ -601,6 +644,77 @@ const R3Game = (() => {
     return m;
   }
 
+  // ---------------------------------------------------------------
+  // Color a partir de los RASGOS REALES de cada r3tard ("Background" /
+  // "Aura" en su metadata on-chain) — pedido explícito: que el fondo y
+  // el aura de cada pieza salgan de sus propios atributos de la
+  // colección, no de un tema inventado por nosotros. No sabemos de
+  // antemano la lista completa de valores posibles que existan en la
+  // colección real, así que: si el texto del rasgo menciona un color/
+  // elemento conocido (rojo, fuego, agua...) usamos ese tono a mano;
+  // si no, generamos un tono estable a partir del propio texto (hash →
+  // matiz HSL) — así el MISMO valor de rasgo siempre da el MISMO color,
+  // aunque no lo tengamos precargado.
+  const NAMED_HUES = {
+    rojo: 4, red: 4,
+    azul: 226, blue: 226,
+    verde: 140, green: 140, esmeralda: 150,
+    amarillo: 48, yellow: 48,
+    morado: 268, purpura: 268, "púrpura": 268, violeta: 268, purple: 268,
+    naranja: 26, orange: 26,
+    rosa: 330, pink: 330, magenta: 320,
+    negro: 250, black: 250,
+    blanco: 250, white: 250,
+    gris: 235, grey: 235, gray: 235, plata: 220, silver: 220,
+    dorado: 45, gold: 45, oro: 45,
+    cian: 180, cyan: 180, turquesa: 174,
+    fuego: 18, fire: 18, lava: 12, flama: 18,
+    hielo: 195, ice: 195, agua: 200, water: 200, oceano: 200, "océano": 200,
+    tierra: 32, earth: 32, tierral: 32,
+    rayo: 52, rayos: 52, lightning: 52, thunder: 52, electrico: 52, "eléctrico": 52,
+    cristal: 280, crystal: 280,
+    viento: 150, wind: 150, aire: 150,
+    cosmico: 268, "cósmico": 268, cosmic: 268, galaxia: 268, espacio: 268,
+    toxico: 96, "tóxico": 96, toxic: 96, veneno: 96, poison: 96,
+    arcoiris: 320, "arcoíris": 320, rainbow: 320,
+  };
+  function hueFromTraitValue(value) {
+    if (!value) return null;
+    const key = String(value).trim().toLowerCase();
+    if (!key) return null;
+    for (const name in NAMED_HUES) {
+      if (key.includes(name)) return NAMED_HUES[name];
+    }
+    let h = 0;
+    for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+    return h % 360;
+  }
+  function hslToHex(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    const toHex = (x) => Math.round(255 * x).toString(16).padStart(2, "0");
+    return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+  }
+  /** Busca el valor de un rasgo por su trait_type (sin importar mayúsculas/acentos exactos). */
+  function findAttr(item, traitType) {
+    if (!item || !Array.isArray(item.attributes)) return null;
+    const hit = item.attributes.find((a) => String(a.trait_type || "").trim().toLowerCase() === traitType);
+    return hit ? hit.value : null;
+  }
+  /** Color único (hex) a partir del rasgo "Aura" real de un r3tard, o null si no tiene. */
+  function auraColorFromItem(item) {
+    const hue = hueFromTraitValue(findAttr(item, "aura"));
+    return hue === null ? null : hslToHex(hue, 78, 62);
+  }
+  /** Paleta de fondo (top/bottom/accent) a partir del rasgo "Background" real, o null si no tiene. */
+  function bgPaletteFromItem(item) {
+    const hue = hueFromTraitValue(findAttr(item, "background"));
+    if (hue === null) return null;
+    return { top: hslToHex(hue, 55, 11), bottom: hslToHex(hue, 55, 30), accent: hslToHex(hue, 70, 58) };
+  }
+
   function spawnNFT() {
     if (collection.length === 0) return;
     const tierKey = pickWeightedTierKey();
@@ -663,14 +777,27 @@ const R3Game = (() => {
     const isCertified = Boolean(item.certifiedName);
     const displayName = item.certifiedName || item.name;
 
+    // Pedido explícito: "Keone" y "James" (piezas con nombre propio) no
+    // tiran fruta/basura como el resto — spamean el logo de Monad, y
+    // más seguido que cualquier otro épico/legendario (ver throwAtAvatar
+    // y el reinicio de throwTimer en update()). Funciona sin importar en
+    // qué tier real haya caído la pieza.
+    const isMonadSpammer = MONAD_SPAMMER_NAMES.includes(String(displayName || "").trim().toLowerCase());
+
     const nft = {
       id: item.tokenId + "_" + Math.random().toString(36).slice(2, 7),
       tokenId: item.tokenId,
       name: displayName,
       isCertified,
+      isMonadSpammer,
       image: item.image,
       tierKey: tier.key,
       tier,
+      // Color del rasgo "Aura" real de esta pieza (si la colección lo
+      // trae) — se usa para pintar su resplandor en vez de un tema
+      // inventado por tier. Si no tiene ese rasgo, queda null y se sigue
+      // usando el color de rareza de siempre (ver drawFalling).
+      auraColor: auraColorFromItem(item),
       pointsValue,
       size,
       hp,
@@ -689,8 +816,15 @@ const R3Game = (() => {
       // A partir de épico, el NFT ataca de verdad: le va lanzando cosas
       // al avatar mientras cae (ver update()/throwAtAvatar). El primer
       // lanzamiento tarda un poco (para no ser injusto apenas aparece);
-      // después repite mientras siga vivo y cayendo.
-      throwTimer: tier.key === "epic" || tier.key === "legendary" ? 700 + Math.random() * 700 : null,
+      // después repite mientras siga vivo y cayendo. Keone/James
+      // (isMonadSpammer) atacan siempre, sin importar el tier, y con un
+      // primer lanzamiento mucho más corto (spam desde que aparecen).
+      throwTimer:
+        tier.key === "epic" || tier.key === "legendary" || isMonadSpammer
+          ? isMonadSpammer
+            ? 250 + Math.random() * 250
+            : 700 + Math.random() * 700
+          : null,
     };
     falling.push(nft);
 
@@ -741,16 +875,29 @@ const R3Game = (() => {
     const originY = cssH() - AVATAR_Y_OFFSET;
     const dx = targetX - originX;
     const dy = targetY - originY;
-    const dist = Math.max(1, Math.hypot(dx, dy));
     const speed = 780;
-    projectiles.push({
-      x: originX,
-      y: originY,
-      vx: (dx / dist) * speed,
-      vy: (dy / dist) * speed,
-      rot: 0,
-      life: 1.4,
-    });
+    if (dx !== 0) lastFireDir = dx < 0 ? -1 : 1; // hacia dónde queda mirando el arma dibujada (ver drawWeapon)
+
+    // Ráfaga según el arma desbloqueada (ver WEAPON_TIER_META/
+    // currentWeaponTier): en vez de un solo disparo, varios en abanico
+    // angosto alrededor del mismo punto — se nota de inmediato que hay
+    // más de un disparo por clic, sin tener que volver a apuntar.
+    const tier = currentWeaponTier();
+    const burst = WEAPON_TIER_META[tier] ? WEAPON_TIER_META[tier].burst : 1;
+    const baseAngle = Math.atan2(dy, dx);
+    const spreadStep = 0.05;
+    const startAngle = baseAngle - (spreadStep * (burst - 1)) / 2;
+    for (let i = 0; i < burst; i++) {
+      const a = startAngle + spreadStep * i;
+      projectiles.push({
+        x: originX,
+        y: originY,
+        vx: Math.cos(a) * speed,
+        vy: Math.sin(a) * speed,
+        rot: 0,
+        life: 1.4,
+      });
+    }
     R3Audio.shoot();
   }
 
@@ -762,10 +909,17 @@ const R3Game = (() => {
    */
   const THROW_OBJECT_KINDS = ["banana", "manzana", "basura", "roca", "hueso", "tomate"];
 
+  // Piezas con nombre propio que, en vez de fruta/basura, spamean el
+  // logo de Monad como ataque — pedido explícito: "que Keone y James
+  // spameen también el logo de Monad como ataque".
+  const MONAD_SPAMMER_NAMES = ["keone", "james"];
+
   /**
    * Un épico/legendario (n) le lanza un objeto al avatar desde donde está
    * cayendo — mismo patrón que fireProjectile pero al revés (el enemigo
-   * apunta al jugador, no el jugador al enemigo).
+   * apunta al jugador, no el jugador al enemigo). Keone/James (ver
+   * isMonadSpammer en spawnNFT) siempre lanzan el logo de Monad en vez
+   * de un objeto al azar.
    */
   function throwAtAvatar(n) {
     const targetX = avatarX, targetY = cssH() - AVATAR_Y_OFFSET;
@@ -779,7 +933,7 @@ const R3Game = (() => {
       vy: (dy / dist) * speed,
       rot: Math.random() * Math.PI * 2,
       spin: (Math.random() < 0.5 ? -1 : 1) * (3 + Math.random() * 3),
-      kind: THROW_OBJECT_KINDS[(Math.random() * THROW_OBJECT_KINDS.length) | 0],
+      kind: n.isMonadSpammer ? "monad" : THROW_OBJECT_KINDS[(Math.random() * THROW_OBJECT_KINDS.length) | 0],
       color: n.tier.color,
       life: 3,
     });
@@ -854,7 +1008,9 @@ const R3Game = (() => {
         n.throwTimer -= dt * 1000;
         if (n.throwTimer <= 0) {
           throwAtAvatar(n);
-          n.throwTimer = 1400 + Math.random() * 1000;
+          // Keone/James "spamean": repiten mucho más seguido que el
+          // resto de épicos/legendarios.
+          n.throwTimer = n.isMonadSpammer ? 380 + Math.random() * 260 : 1400 + Math.random() * 1000;
         }
       }
 
@@ -1020,6 +1176,15 @@ const R3Game = (() => {
       killsByTier[n.tierKey] = (killsByTier[n.tierKey] || 0) + 1;
       if (n.isCertified) certifiedKills += 1;
 
+      // Progresión de arma (ver WEAPON_TIER_META/currentWeaponTier): al
+      // subir de tier se avisa UNA sola vez con un banner grande, igual
+      // que el aviso de "daño desbloqueado".
+      const weaponTierNow = currentWeaponTier();
+      if (weaponTierNow > lastAnnouncedWeaponTier) {
+        lastAnnouncedWeaponTier = weaponTierNow;
+        onWeaponUnlock(WEAPON_TIER_META[weaponTierNow]);
+      }
+
       const comboMul = 1 + Math.min(combo - 1, 8) * 0.12;
       const pts = Math.round(n.pointsValue * comboMul);
       score += pts;
@@ -1029,10 +1194,31 @@ const R3Game = (() => {
       burst(n.x, n.y, n.tier.color, n.tierKey === "legendary" ? 60 : n.tierKey === "epic" ? 40 : 18, n.tier.sizeMul);
       floatText(n.x, n.y, `+${pts}${combo > 1 ? ` x${combo}` : ""}`, n.tier.color);
 
+      // Rareza superior (raro en adelante) devuelve vida al morir —
+      // pedido explícito: raro/poco-común-o-menos no regala nada; épico
+      // suma 1.5 vidas de una vez; legendario rellena la barra entera.
+      if (n.tierKey === "legendary" || n.tierKey === "epic" || n.tierKey === "rare") {
+        const livesBefore = lives;
+        if (n.tierKey === "legendary") {
+          lives = CFG.MAX_LIVES;
+        } else if (n.tierKey === "epic") {
+          lives = Math.min(CFG.MAX_LIVES, lives + 1.5);
+        } else {
+          lives = Math.min(CFG.MAX_LIVES, lives + 1);
+        }
+        if (lives !== livesBefore) {
+          onLivesChange(lives);
+          const gained = Math.round((lives - livesBefore) * 10) / 10;
+          const gainLabel = n.tierKey === "legendary" ? "¡VIDA AL MÁXIMO!" : `+${gained} vida${gained === 1 ? "" : "s"}`;
+          floatText(n.x, n.y - 34, gainLabel, "#8f7bff");
+        }
+      }
+
       onKill({
         tokenId: n.tokenId,
         name: n.name,
         isCertified: n.isCertified,
+        color: n.tier.color,
         // BUG REAL corregido aquí: si la colección se cargó por el
         // respaldo on-chain (sin el snapshot estático), n.image puede
         // ser una URI ipfs://... sin resolver. Eso se guardaba tal cual
@@ -1084,13 +1270,16 @@ const R3Game = (() => {
   // Draw
   // ---------------------------------------------------------------
   function drawBackground() {
-    const theme = THEMES[(wave - 1) % THEMES.length];
-
     // Fondo dinámico: la imagen real de un r3tard (el mismo mecanismo de
     // carga que usan los que caen), recortada para llenar toda la
     // pantalla sin importar su proporción. Va cambiando de menos raro a
     // más raro a medida que avanza la partida (ver update()).
     const bgItem = bgSortedList[bgIndex];
+    // Pedido explícito: el tinte de color de fondo sale del propio rasgo
+    // "Background" de ESE r3tard (si la colección lo trae), no de un
+    // tema fijo por oleada — si no tiene ese rasgo, se cae de respaldo
+    // al tema de siempre para que nunca se vea sin color.
+    const theme = (bgItem && bgPaletteFromItem(bgItem)) || THEMES[(wave - 1) % THEMES.length];
     const bgImg = bgItem ? bgImageCache.get(bgItem.tokenId) : null;
     if (bgImg && bgImg !== "loading" && bgImg !== "error" && bgImg.naturalWidth) {
       const iw = bgImg.naturalWidth, ih = bgImg.naturalHeight;
@@ -1114,7 +1303,8 @@ const R3Game = (() => {
       ctx.fillRect(0, 0, cssW(), cssH());
     }
 
-    // Tinte de color según la oleada (el sistema de paletas por tema).
+    // Tinte de color (del rasgo "Background" real de la pieza de fondo,
+    // o del tema por oleada de respaldo si no tiene ese rasgo).
     const g = ctx.createLinearGradient(0, 0, 0, cssH());
     g.addColorStop(0, theme.top + "55");
     g.addColorStop(1, theme.bottom + "55");
@@ -1346,11 +1536,14 @@ const R3Game = (() => {
 
     // Aura según tier — entre más raro, más grande y más intensa (y
     // legendarios/épicos además tienen un anillo de "chispas" girando).
-    // Para legendario, el color Y la forma de las chispas salen de su
-    // propio tema (ver LEGENDARY_AURA_THEMES/auraThemeFor) — cada pieza
-    // única se ve distinta, no todas del mismo dorado genérico.
+    // Para legendario, la forma de las chispas sale de su propio tema
+    // (ver LEGENDARY_AURA_THEMES/auraThemeFor) — cada pieza única se ve
+    // distinta. El COLOR del resplandor, en cambio, sale del rasgo
+    // "Aura" real de esa pieza (n.auraColor, ver spawnNFT) cuando la
+    // colección lo trae; si no lo trae, cae de respaldo al tema por
+    // tier de siempre.
     const legendaryTheme = n.tierKey === "legendary" ? auraThemeFor(n) : null;
-    const auraColor = legendaryTheme ? legendaryTheme.glowColor : n.tier.color;
+    const auraColor = n.auraColor || (legendaryTheme ? legendaryTheme.glowColor : n.tier.color);
     const auraIntensity = { uncommon: 0.18, rare: 0.34, epic: 0.55, legendary: 0.95 }[n.tierKey] || 0;
     if (auraIntensity > 0) {
       ctx.save();
@@ -1459,7 +1652,19 @@ const R3Game = (() => {
     ctx.rotate(p.rot);
     ctx.lineJoin = "round";
 
-    if (p.kind === "banana") {
+    if (p.kind === "monad") {
+      // Keone/James (ver isMonadSpammer en spawnNFT): spamean el logo
+      // de Monad en vez de fruta/basura.
+      const r = 11;
+      if (monadOrbImg && monadOrbImg.complete && monadOrbImg.naturalWidth) {
+        ctx.drawImage(monadOrbImg, -r, -r, r * 2, r * 2);
+      } else {
+        ctx.fillStyle = "#6E54FF";
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (p.kind === "banana") {
       ctx.fillStyle = "#f5d94e";
       ctx.strokeStyle = "#8a6a1a";
       ctx.lineWidth = 1.5;
@@ -1622,6 +1827,36 @@ const R3Game = (() => {
   }
 
   /**
+   * Arma que el avatar va desbloqueando (ver WEAPON_TIER_META/
+   * currentWeaponTier) — pedido explícito: "ajustada al personaje", así
+   * que se dibuja pegada al avatar y a su mismo tamaño relativo (nunca
+   * más grande que el propio avatar), mirando hacia donde apuntó el
+   * último disparo (lastFireDir).
+   */
+  function drawWeapon() {
+    const tier = currentWeaponTier();
+    if (tier <= 0) return;
+    const meta = WEAPON_TIER_META[tier];
+    const img = weaponImgs[meta.imgKey];
+    if (!img || !img.complete || !img.naturalWidth) return;
+
+    const x = avatarX;
+    const y = cssH() - AVATAR_Y_OFFSET;
+    const r = 30;
+    const flip = lastFireDir < 0 ? -1 : 1;
+    const targetW = r * 1.7; // ajustada al tamaño del avatar (r=30), no más grande que él
+    const scale = targetW / img.naturalWidth;
+    const w = img.naturalWidth * scale;
+    const h = img.naturalHeight * scale;
+
+    ctx.save();
+    ctx.translate(x + flip * r * 0.5, y + r * 0.1);
+    ctx.scale(flip, 1);
+    ctx.drawImage(img, -w * 0.12, -h / 2, w, h);
+    ctx.restore();
+  }
+
+  /**
    * Destello de pantalla completa cuando cae algo especial (épico o
    * legendario) — hace que el momento se sienta grande incluso antes de
    * que el NFT llegue a la mitad de la pantalla.
@@ -1659,6 +1894,7 @@ const R3Game = (() => {
     for (const p of enemyThrows) drawEnemyThrow(p);
     drawFloatTexts();
     drawAvatar();
+    drawWeapon();
 
     ctx.restore();
   }
@@ -1692,6 +1928,8 @@ const R3Game = (() => {
     legendaryKills = 0;
     legendariesSpawned = 0;
     sessionKilledIds = new Set();
+    lastFireDir = 1;
+    lastAnnouncedWeaponTier = 0;
     spawnTimer = 600;
     spawnFlash = null;
     cutoutCache.clear();
