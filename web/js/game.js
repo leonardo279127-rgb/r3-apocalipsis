@@ -185,6 +185,8 @@ const R3Game = (() => {
   function init(canvasEl, callbacks) {
     canvas = canvasEl;
     ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     onScoreChange = callbacks.onScoreChange || onScoreChange;
     onLivesChange = callbacks.onLivesChange || onLivesChange;
     onWaveChange = callbacks.onWaveChange || onWaveChange;
@@ -844,7 +846,7 @@ const R3Game = (() => {
     // — se elige del set del idioma ACTIVO, no siempre del español.
     const nadPhrasesPool = I18N.COMMON_NAD_PHRASES[I18N.getLang()] || I18N.COMMON_NAD_PHRASES.es;
     const commonTaunt =
-      tier.key === "common" && Math.random() < 0.02
+      tier.key === "common" && Math.random() < 0.20
         ? nadPhrasesPool[(Math.random() * nadPhrasesPool.length) | 0]
         : null;
 
@@ -970,7 +972,7 @@ const R3Game = (() => {
       // Monad, cripto-Twitter, humor propio...) — ver COMMON_NAD_PHRASES.
       // A diferencia de los legendarios, es UNA sola vez, nunca en bucle.
       commonTaunt: commonTaunt,
-      commonTauntTimer: commonTaunt ? 350 + Math.random() * 500 : null,
+      commonTauntTimer: commonTaunt ? 500 + Math.random() * 650 : null,
     };
     falling.push(nft);
 
@@ -1524,7 +1526,10 @@ const R3Game = (() => {
     if (img && img.complete && img.naturalWidth) {
       const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
       const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+      ctx.save();
+      ctx.filter = "saturate(1.10) contrast(1.06)";
       ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      ctx.restore();
     } else {
       // Todavía no cargó (o falló) — fondo plano con el color de acento
       // del lugar, para no dejar la pantalla en negro puro mientras tanto.
@@ -2112,9 +2117,32 @@ const R3Game = (() => {
     const smallFont = "600 14px 'Kalam', 'Segoe UI', sans-serif";
     for (const t of floatTexts) {
       ctx.font = t.small ? smallFont : bigFont;
-      ctx.globalAlpha = Math.max(0, t.life) * (t.small ? 0.85 : 1);
+      ctx.globalAlpha = Math.max(0, t.life) * (t.small ? 0.95 : 1);
+      const maxW = Math.min(cssW() - 28, t.small ? 300 : 420);
+      let text = String(t.text || "");
+      if (ctx.measureText(text).width > maxW) {
+        while (text.length > 8 && ctx.measureText(text + "…").width > maxW) text = text.slice(0, -1);
+        text += "…";
+      }
+      const tw = ctx.measureText(text).width;
+      if (t.small) {
+        const padX = 9, padY = 5;
+        const bx = Math.max(8, Math.min(cssW() - tw - padX * 2 - 8, t.x - tw / 2 - padX));
+        const by = Math.max(8, t.y - 16 - padY);
+        ctx.fillStyle = "rgba(11,7,16,0.88)";
+        ctx.beginPath();
+        const bw = tw + padX * 2, bh = 22 + padY * 2, br = 9;
+        const x0 = bx, y0 = by;
+        ctx.moveTo(x0 + br, y0); ctx.lineTo(x0 + bw - br, y0);
+        ctx.quadraticCurveTo(x0 + bw, y0, x0 + bw, y0 + br);
+        ctx.lineTo(x0 + bw, y0 + bh - br); ctx.quadraticCurveTo(x0 + bw, y0 + bh, x0 + bw - br, y0 + bh);
+        ctx.lineTo(x0 + br, y0 + bh); ctx.quadraticCurveTo(x0, y0 + bh, x0, y0 + bh - br);
+        ctx.lineTo(x0, y0 + br); ctx.quadraticCurveTo(x0, y0, x0 + br, y0); ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = t.color; ctx.lineWidth = 1.5; ctx.stroke();
+      }
       ctx.fillStyle = t.color;
-      ctx.fillText(t.text, t.x, t.y);
+      ctx.fillText(text, Math.max(10 + tw / 2, Math.min(cssW() - 10 - tw / 2, t.x)), t.y);
     }
     ctx.globalAlpha = 1;
   }

@@ -491,12 +491,14 @@ html, body {
 
 .rare-banner {
   position: absolute;
-  top: 30%;
+  top: clamp(105px, 18%, 180px);
   left: 50%;
   transform: translate(-50%, -50%) scale(0.8);
   font-family: 'Kalam', cursive, sans-serif;
   font-weight: 700;
-  font-size: clamp(1.3rem, 5vw, 2.1rem);
+  font-size: clamp(1.15rem, 4.5vw, 2rem);
+  max-width: min(88vw, 620px);
+  z-index: 11;
   text-align: center;
   padding: 12px 28px;
   border-radius: 20px;
