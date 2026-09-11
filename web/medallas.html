@@ -125,12 +125,28 @@
 
       async function loadMyMedals(address) {
         if (!R3Wallet.isContractConfigured()) return;
+        const hintBefore = mineHint.textContent;
         try {
           const contract = new ethers.Contract(CFG.GAME_CONTRACT_ADDRESS, window.R3_ABIS.GAME, R3Events.getProvider());
           const fromBlock = Number(CFG.GAME_CONTRACT_DEPLOY_BLOCK) || 0;
           const toBlock = await R3Events.getLatestBlock();
-          const filter = contract.filters.AchievementUnlocked(address);
-          const logs = await contract.queryFilter(filter, fromBlock, toBlock);
+          // OJO: antes esto era un único `contract.queryFilter(filter, fromBlock, toBlock)`
+          // sin trocear — funcionaba en pruebas porque el contrato recién
+          // desplegado no tenía casi bloques de historia, pero en el sitio
+          // real (deploy block muy anterior al bloque actual) el rango es
+          // de cientos de miles de bloques y varios RPCs públicos lo
+          // rechazan de una con "getLogs request exceeded max allowed
+          // range" — por eso al conectar wallet en medallas.html tiraba
+          // ese error en vez de mostrar el medallero. Se cambió a
+          // R3Events.queryLogsChunked (mismo mecanismo ya usado en el
+          // ranking global de esta misma página y en ranking.html), que
+          // parte el rango en pedazos y los va reintentando/rotando de
+          // RPC si hace falta. `filterArgs: [address]` mantiene el filtro
+          // "solo MIS logros" en vez de traer los de todo el mundo.
+          const logs = await R3Events.queryLogsChunked(contract, "AchievementUnlocked", fromBlock, toBlock, (done, total) => {
+            mineHint.textContent = I18N.t("medals.reading_achievements") + ` (${Math.round((done / total) * 100)}%)`;
+          }, [address]);
+          mineHint.textContent = hintBefore;
           const unlockedMap = new Map();
           for (const log of logs) {
             unlockedMap.set(Number(log.args.achievementId), Number(log.args.timestamp));
@@ -139,6 +155,7 @@
           renderMedalGrid(unlockedMap);
         } catch (err) {
           console.error(err);
+          mineHint.textContent = hintBefore;
           showError((err && err.message) || I18N.t("err.my_medals_read_failed"));
         }
       }

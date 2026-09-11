@@ -51,8 +51,12 @@ const R3Events = (() => {
    * fromBlock y toBlock (ambos incluidos), llamando onProgress(bloquesLeidos,
    * bloquesTotales) según avanza. Devuelve los logs decodificados
    * (ethers EventLog, con .args) en orden de bloque ascendente.
+   *
+   * `filterArgs` (opcional) se pasa tal cual a `contract.filters[eventName](...)`
+   * — por ejemplo `[address]` para traer solo los eventos de un jugador en
+   * particular, en vez de la colección completa.
    */
-  async function queryLogsChunked(contract, eventName, fromBlock, toBlock, onProgress) {
+  async function queryLogsChunked(contract, eventName, fromBlock, toBlock, onProgress, filterArgs) {
     const totalBlocks = Math.max(1, toBlock - fromBlock + 1);
     const results = [];
     let cursor = fromBlock;
@@ -63,7 +67,7 @@ const R3Events = (() => {
     while (cursor <= toBlock) {
       const end = Math.min(cursor + chunk - 1, toBlock);
       try {
-        const filter = contract.filters[eventName]();
+        const filter = contract.filters[eventName](...(filterArgs || []));
         const logs = await contract.queryFilter(filter, cursor, end);
         results.push(...logs);
         onProgress && onProgress(Math.min(end - fromBlock + 1, totalBlocks), totalBlocks);
