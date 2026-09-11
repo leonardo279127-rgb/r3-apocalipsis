@@ -28,6 +28,15 @@ const R3Game = (() => {
   let particles = [];
   let floatTexts = [];
   let banners = []; // avisos grandes tipo "¡LEGENDARIO detectado!"
+  // Frases "cultura nad" de comunes ya en camino de dispararse (ver
+  // spawnNFT/COMMON_NAD_PHRASES) — vive SEPARADA de `falling` a propósito:
+  // si no, se perdían cuando el r3tard moría antes de que le tocara
+  // "hablar" (los comunes se matan rapidísimo). Guardamos la referencia
+  // al objeto nft (aunque ya lo hayan sacado de `falling`, el objeto en sí
+  // sigue vivo en memoria con su última posición conocida) para que la
+  // frase siempre salga, en el lugar donde el jugador lo vio por última
+  // vez.
+  let pendingCommonTaunts = [];
 
   let score = 0;
   let lives = CFG.MAX_LIVES;
@@ -81,15 +90,24 @@ const R3Game = (() => {
   // se vea vertical en vez de horizontal como está ahora").
   let lastAnnouncedWeaponTier = 0; // último tier ya avisado con el banner, no repetir el aviso
 
-  // ---- Fondo: un lugar real distinto por cada nivel de dificultad (1
-  // Colombia, 2 Venezuela, 3 Argentina, 4 Brasil, 5 España, 6 Francia,
-  // 7 Alemania, 8 China, 9 Japón, 10 Gary, Indiana) — pedido explícito:
-  // "los fondos no me gustan, le falta vida, pon un lugar característico
-  // por nivel". Reemplaza al viejo fondo (una imagen translúcida de un
-  // r3tard cualquiera, tintada por rareza/oleada), que quedó descartado
-  // por completo. Cada lugar es una ilustración dibujada por código
-  // (fotos reales, ver COUNTRY_SCENES/countryBgImgs más abajo).
-
+  // ---- Fondo: escenas 100% animadas y hechas a medida, una por cada
+  // nivel de dificultad (1-10) — pedido explícito del usuario: "los
+  // fondos son pésimos, quiero cambiarlos por imágenes de excelente
+  // calidad, ojalá animaciones que encajen con el juego y con monad" y,
+  // más específico todavía: "no quiero esos mismos fondos [las fotos
+  // reales que había antes, ni las del zip nuevo], quiero personalizados
+  // por ti, ojalá animado, consulta el estilo de los r3tards.club" — o
+  // sea: nada de fotos ni de imágenes ajenas, todo dibujado y animado por
+  // código, en el mismo espíritu oscuro/irreverente de r3tards.club
+  // (fondo oscuro, paleta morada de Monad, siluetas rotas, actitud de
+  // "apocalipsis cripto" antes que paisaje bonito). No hay herramienta de
+  // generación de imágenes disponible en este entorno, así que la única
+  // forma de tener algo "animado y de excelente calidad" de verdad (no
+  // una foto estática) es Canvas puro: gradiente + horizonte de torres
+  // quebradas (parallax) + chispas/ceniza subiendo + un "portal" Monad
+  // pulsante + glitch/interferencia en los niveles más altos, todo
+  // reescalando en intensidad junto con la dificultad (ver MONAD_SCENES).
+  //
   // `name` es bilingüe ({es, en}, ver auraThemeFor/getLang más abajo en
   // este mismo archivo para el mismo patrón) — se usa en el HUD
   // (hud-wave-name) y en el nombre de oleada, así que tiene que salir en
@@ -105,37 +123,68 @@ const R3Game = (() => {
     return theme.name[I18N.getLang()] || theme.name.es;
   }
 
-  // ---- Escenas de fondo por país/lugar (ver getCountryIdx/countryBgImgs) ----
-  // Pedido explícito del usuario ("están horribles los fondos"): reemplaza
-  // a la versión anterior (ilustraciones 100% dibujadas por código) por
-  // FOTOS REALES que el propio usuario mandó y ordenó él mismo, una por
-  // cada uno de los 10 niveles de dificultad. Los archivos viven en
-  // `web/assets/backgrounds/bg-0N-*.jpg` (ya redimensionados/comprimidos).
-  // `accent` se conserva a mano (color de acento para el resplandor
-  // pulsante encima de la foto, ver drawBackground) — no se intentó
-  // extraer un color dominante automáticamente.
-  const COUNTRY_SCENES = [
-    { name: "Colombia", accent: "#7cffb2", file: "bg-01-colombia.jpg" },
-    { name: "Venezuela", accent: "#8fd1ff", file: "bg-02-venezuela.jpg" },
-    { name: "Argentina", accent: "#ff9d5c", file: "bg-03-argentina.jpg" },
-    { name: "Brasil", accent: "#ffd27a", file: "bg-04-brasil.jpg" },
-    { name: "España", accent: "#ffb37a", file: "bg-05-espana.jpg" },
-    { name: "Francia", accent: "#c77dff", file: "bg-06-francia.jpg" },
-    { name: "Alemania", accent: "#8fb8ff", file: "bg-07-alemania.jpg" },
-    { name: "China", accent: "#ffb84d", file: "bg-08-china.jpg" },
-    { name: "Japón", accent: "#ff9ecf", file: "bg-09-japon.jpg" },
-    { name: "Gary, Indiana", accent: "#ff7a45", file: "bg-10-gary-indiana.jpg" },
+  // ---- Escenas de fondo por nivel de dificultad (ver getSceneIdx) ----
+  // Progresión deliberada: empieza en el morado de marca de Monad (una
+  // "grieta" apenas visible) y va derivando hacia rojo/naranja a medida
+  // que sube la dificultad — la idea es que el propio fondo "cuente" que
+  // el apocalipsis se agrava, sin depender de texto. `intensity` (0-1)
+  // controla cuántas chispas hay, qué tan quebrado se ve el horizonte y
+  // a partir de qué nivel aparece el efecto de glitch/interferencia.
+  const MONAD_SCENES = [
+    { name: { es: "Grieta Monad", en: "Monad Rift" }, top: "#0c0620", bottom: "#2a1350", accent: "#8f7bff", ember: "#b7a6ff", skyline: "#190f34", intensity: 0.12, glitch: false },
+    { name: { es: "Testnet en Ruinas", en: "Testnet Ruins" }, top: "#0d0724", bottom: "#341a68", accent: "#7cc4ff", ember: "#a9dcff", skyline: "#1a1236", intensity: 0.22, glitch: false },
+    { name: { es: "Enjambre de Nodos", en: "Node Swarm" }, top: "#100729", bottom: "#3c1874", accent: "#c77dff", ember: "#dcb0ff", skyline: "#1d1039", intensity: 0.32, glitch: false },
+    { name: { es: "Tormenta de Gas", en: "Gas Storm" }, top: "#130620", bottom: "#4c1546", accent: "#ff9ecf", ember: "#ffc2e0", skyline: "#22102e", intensity: 0.42, glitch: false },
+    { name: { es: "Fork Salvaje", en: "Wild Fork" }, top: "#17051b", bottom: "#5c1348", accent: "#ff7a45", ember: "#ffbd8c", skyline: "#26102a", intensity: 0.5, glitch: false },
+    { name: { es: "Colapso de Bloques", en: "Block Collapse" }, top: "#190416", bottom: "#6c1332", accent: "#ff5e9c", ember: "#ffa8c8", skyline: "#2a0f24", intensity: 0.6, glitch: true },
+    { name: { es: "Núcleo Fragmentado", en: "Fragmented Core" }, top: "#1c0410", bottom: "#7c1120", accent: "#ff5e1a", ember: "#ffb277", skyline: "#2e0e19", intensity: 0.7, glitch: true },
+    { name: { es: "Reorg Total", en: "Total Reorg" }, top: "#1f0310", bottom: "#87101a", accent: "#ff3d5c", ember: "#ff92a7", skyline: "#330c14", intensity: 0.8, glitch: true },
+    { name: { es: "Última Confirmación", en: "Final Confirmation" }, top: "#22030a", bottom: "#920d10", accent: "#ff2e2e", ember: "#ff8080", skyline: "#360a0d", intensity: 0.9, glitch: true },
+    { name: { es: "Apocalipsis On-Chain", en: "On-Chain Apocalypse" }, top: "#260206", bottom: "#a20c0c", accent: "#ffce45", ember: "#ffe08f", skyline: "#3a080a", intensity: 1, glitch: true },
   ];
-  // Un <img> por nivel, precargado una sola vez (ver init()) — igual que
-  // monadOrbImg/weaponImgs más abajo.
-  const countryBgImgs = [];
 
   /** Nivel de dificultad real (1-10, ver SPAWN_PROGRESSION) → índice 0-9
-   * en COUNTRY_SCENES. El nivel 0 (antes del primer minuto) usa el mismo
-   * lugar que el nivel 1, para no arrancar la partida sin escenario. */
-  function getCountryIdx() {
-    return Math.max(0, Math.min(COUNTRY_SCENES.length - 1, lastDifficultyStep - 1));
+   * en MONAD_SCENES. El nivel 0 (antes del primer minuto) usa la misma
+   * escena que el nivel 1, para no arrancar la partida sin escenario. */
+  function getSceneIdx() {
+    return Math.max(0, Math.min(MONAD_SCENES.length - 1, lastDifficultyStep - 1));
   }
+
+  // ---- Horizonte de torres/monolitos quebrados (silueta de fondo) ----
+  // Se genera UNA sola vez por escena (no en cada frame — sería carísimo
+  // y además parpadearía de forma distinta cuadro a cuadro) usando un
+  // generador pseudoaleatorio con semilla fija (mismo resultado siempre,
+  // no cambia entre partidas ni recargas). Las coordenadas quedan en
+  // fracciones (0-1 de ancho/alto) para poder reescalarlas al tamaño real
+  // del canvas en cada resize, y se generan de -0.25 a 1.25 (más ancho
+  // que la pantalla) para poder desplazarlas lentamente en parallax sin
+  // que se note el borde.
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function buildSkyline(seed, intensity) {
+    const rand = mulberry32(seed * 977 + 13);
+    const count = 9 + Math.round(intensity * 6); // más quebrado/denso en niveles altos
+    const towers = [];
+    for (let i = 0; i < count; i++) {
+      const x = -0.25 + (1.5 * (i + rand() * 0.6)) / count;
+      const width = 0.028 + rand() * (0.05 + intensity * 0.03);
+      const height = 0.1 + rand() * (0.22 + intensity * 0.22);
+      const jag = rand() < 0.55; // punta rota/irregular en vez de plana
+      const crack = rand() < 0.3 + intensity * 0.3; // grieta luminosa vertical
+      const antenna = rand() < 0.35; // varilla/antena rota asomando arriba
+      towers.push({ x, width, height, jag, crack, antenna, seedA: rand(), seedB: rand() });
+    }
+    return towers;
+  }
+  // Cache: una silueta por escena, calculada una sola vez al cargar el módulo.
+  const SKYLINES = MONAD_SCENES.map((scene, i) => buildSkyline(i + 1, scene.intensity));
 
   let monadOrbImg = null;
   const weaponImgs = {}; // imgKey -> HTMLImageElement (ver WEAPON_TIER_META)
@@ -185,8 +234,6 @@ const R3Game = (() => {
   function init(canvasEl, callbacks) {
     canvas = canvasEl;
     ctx = canvas.getContext("2d");
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
     onScoreChange = callbacks.onScoreChange || onScoreChange;
     onLivesChange = callbacks.onLivesChange || onLivesChange;
     onWaveChange = callbacks.onWaveChange || onWaveChange;
@@ -212,14 +259,9 @@ const R3Game = (() => {
       weaponImgs[key] = img;
     }
 
-    // Las 10 fotos de fondo (una por nivel/país, ver COUNTRY_SCENES) —
-    // se precargan todas de una vez al iniciar, así ya están listas
-    // (o casi) para cuando el nivel de dificultad las necesite.
-    COUNTRY_SCENES.forEach((scene, i) => {
-      const img = new Image();
-      img.src = `assets/backgrounds/${scene.file}`;
-      countryBgImgs[i] = img;
-    });
+    // Los 10 fondos (ver MONAD_SCENES/drawBackground) ya no son fotos que
+    // precargar — son 100% Canvas animado, así que no hay nada que
+    // esperar acá: quedan listos para dibujarse desde el primer frame.
 
     resize();
     window.addEventListener("resize", resize);
@@ -427,8 +469,8 @@ const R3Game = (() => {
    * antes de que el r3tard toque el piso (o lo mates), su imagen nunca
    * llegó a mostrarse a tiempo: se ve como un círculo vacío que "no
    * aparece", aunque el archivo exista y esté bien en el repo. (El fondo
-   * ya no depende de esto — ver COUNTRY_SCENES — pero los r3tards que
-   * caen sí siguen usando su imagen real.)
+   * ya no depende de esto — es Canvas animado, ver MONAD_SCENES — pero
+   * los r3tards que caen sí siguen usando su imagen real.)
    *
    * OJO — esto no tiene nada que ver con dónde "viven" las imágenes. Las
    * 1033 imágenes YA están en el repositorio (`web/data/images/*.webp`,
@@ -840,13 +882,22 @@ const R3Game = (() => {
     const pointsValue = Math.round(tier.points * rarityBonusMultiplier(item));
     const movement = pickMovementPattern(tier.key);
 
-    // 2% de probabilidad de que este r3tard COMÚN venga con una frase de
-    // "cultura nad" (ver R3I18N.COMMON_NAD_PHRASES/nft.commonTauntTimer más
-    // abajo). Las frases viven en js/i18n.js (bilingüe, ver ahí el porqué)
-    // — se elige del set del idioma ACTIVO, no siempre del español.
+    // 14% de probabilidad de que este r3tard COMÚN venga con una frase de
+    // "cultura nad" (ver R3I18N.COMMON_NAD_PHRASES más abajo). Las frases
+    // viven en js/i18n.js (bilingüe, ver ahí el porqué) — se elige del set
+    // del idioma ACTIVO, no siempre del español.
+    //
+    // Antes era 2% Y además el texto solo se mostraba si el r3tard seguía
+    // vivo 350-850ms después de aparecer — como los comunes son los más
+    // fáciles/rápidos de matar, en la práctica casi ninguna frase llegaba
+    // a dibujarse (se perdía junto con el r3tard). Reportado por el
+    // usuario: "jugué mucho rato y no apareció ninguno". Ahora se sube la
+    // probabilidad Y se dispara la frase EN EL MOMENTO en que aparece
+    // (ver más abajo, floatText inmediata), para que se vea sí o sí sin
+    // importar qué tan rápido lo mate el jugador.
     const nadPhrasesPool = I18N.COMMON_NAD_PHRASES[I18N.getLang()] || I18N.COMMON_NAD_PHRASES.es;
     const commonTaunt =
-      tier.key === "common" && Math.random() < 0.20
+      tier.key === "common" && Math.random() < 0.14
         ? nadPhrasesPool[(Math.random() * nadPhrasesPool.length) | 0]
         : null;
 
@@ -967,14 +1018,21 @@ const R3Game = (() => {
       // flotantes mientras sigue vivo (ver update()/floatText) — solo
       // los legendarios "hablan".
       tauntTimer: legendaryTheme ? 2200 + Math.random() * 1800 : null,
-      // Pedido explícito: 2% de probabilidad de que un r3tard COMÚN suelte
-      // una frase de "cultura nad" (gmonad, nad nad nad, mascotas de
-      // Monad, cripto-Twitter, humor propio...) — ver COMMON_NAD_PHRASES.
-      // A diferencia de los legendarios, es UNA sola vez, nunca en bucle.
+      // Pedido explícito: 14% de probabilidad de que un r3tard COMÚN
+      // suelte una frase de "cultura nad" (gmonad, nad nad nad, mascotas
+      // de Monad, cripto-Twitter, humor propio, chismes sobre otros
+      // r3tards...) — ver COMMON_NAD_PHRASES. Es UNA sola vez, nunca en
+      // bucle como los legendarios.
       commonTaunt: commonTaunt,
-      commonTauntTimer: commonTaunt ? 500 + Math.random() * 650 : null,
     };
     falling.push(nft);
+
+    // Se encola en pendingCommonTaunts (ver declaración arriba), NO en un
+    // timer dentro del propio nft — así la frase sale sí o sí, aunque el
+    // jugador lo mate antes de que le toque "hablar".
+    if (commonTaunt) {
+      pendingCommonTaunts.push({ nft, delay: 300 + Math.random() * 450 });
+    }
 
     // Tope de atacantes simultáneos (ver MAX_ACTIVE_THROWERS/
     // activeThrowers arriba): si ya hay demasiados tirando cosas a la
@@ -1129,9 +1187,13 @@ const R3Game = (() => {
 
   function floatText(x, y, text, color, small) {
     // `small` (opcional): usado por las frases de los r3tards COMUNES (ver
-    // COMMON_NAD_PHRASES/spawnNFT) — más chicas y discretas que las de los
-    // legendarios, para que no les quiten protagonismo.
-    floatTexts.push({ x, y, text, color, life: small ? 0.9 : 1.1, vy: small ? -38 : -46, small: !!small });
+    // COMMON_NAD_PHRASES/spawnNFT). Antes eran casi invisibles (chicas,
+    // sin contorno, 0.9s) — el jugador reportó que jugando mucho rato
+    // nunca vio ninguna. Ahora duran más y llevan una "píldora" de fondo
+    // + contorno para que se lean bien sobre cualquier fondo, sin llegar
+    // al tamaño de las de los legendarios (siguen siendo un detalle, no
+    // el protagonista).
+    floatTexts.push({ x, y, text, color, life: small ? 1.7 : 1.1, maxLife: small ? 1.7 : 1.1, vy: small ? -30 : -46, small: !!small });
   }
 
   // Frases sueltas de "cultura nad" que un r3tard COMÚN puede soltar al
@@ -1210,19 +1272,6 @@ const R3Game = (() => {
           const phrase = phrases[(Math.random() * phrases.length) | 0];
           floatText(n.x, n.y - n.size / 2 - 8, phrase, n.legendaryTheme.glowColor);
           n.tauntTimer = 3200 + Math.random() * 2600;
-        }
-      }
-
-      // Frase de "cultura nad" de un r3tard COMÚN (ver COMMON_NAD_PHRASES/
-      // spawnNFT: 2% de probabilidad al aparecer) — a diferencia de los
-      // legendarios, esto pasa UNA sola vez por r3tard (no en bucle) y se
-      // dibuja más chico/discreto (floatText con small=true), justo para
-      // que sea un detalle simpático sin robarle protagonismo a nadie.
-      if (n.commonTauntTimer !== null) {
-        n.commonTauntTimer -= dt * 1000;
-        if (n.commonTauntTimer <= 0) {
-          floatText(n.x, n.y - n.size / 2 - 6, n.commonTaunt, "#c9c9d6", true);
-          n.commonTauntTimer = null;
         }
       }
 
@@ -1372,6 +1421,20 @@ const R3Game = (() => {
       pt.vy += 220 * dt;
     }
 
+    // Frases "cultura nad" de comunes en espera (ver spawnNFT/
+    // pendingCommonTaunts) — se procesan SEPARADAS de `falling` a
+    // propósito: aunque el jugador ya haya matado a ese r3tard (lo más
+    // común, dado lo rápido que caen los comunes), la frase sale igual,
+    // en la última posición conocida del objeto.
+    for (let i = pendingCommonTaunts.length - 1; i >= 0; i--) {
+      const p = pendingCommonTaunts[i];
+      p.delay -= dt * 1000;
+      if (p.delay <= 0) {
+        floatText(p.nft.x, p.nft.y - p.nft.size / 2 - 10, p.nft.commonTaunt, "#f4f1ff", true);
+        pendingCommonTaunts.splice(i, 1);
+      }
+    }
+
     // Textos flotantes
     for (let i = floatTexts.length - 1; i >= 0; i--) {
       const t = floatTexts[i];
@@ -1511,46 +1574,239 @@ const R3Game = (() => {
   // ---------------------------------------------------------------
   // Draw
   // ---------------------------------------------------------------
-  function drawBackground() {
-    // Un lugar real distinto por cada nivel de dificultad (ver
-    // COUNTRY_SCENES/getCountryIdx/countryBgImgs más arriba) — pedido
-    // explícito: fotos REALES que mandó el usuario, una por país/nivel
-    // (reemplaza a la versión anterior, ilustrada por código, que el
-    // usuario encontró "horrible"). Se dibuja con encaje tipo "cover"
-    // (recorta lo que sobre, nunca deforma la foto) para llenar el
-    // canvas sin importar el tamaño de pantalla.
-    const idx = getCountryIdx();
-    const scene = COUNTRY_SCENES[idx];
-    const img = countryBgImgs[idx];
-    const w = cssW(), h = cssH();
-    if (img && img.complete && img.naturalWidth) {
-      const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
-      const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
-      ctx.save();
-      ctx.filter = "saturate(1.10) contrast(1.06)";
-      ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
-      ctx.restore();
-    } else {
-      // Todavía no cargó (o falló) — fondo plano con el color de acento
-      // del lugar, para no dejar la pantalla en negro puro mientras tanto.
-      ctx.fillStyle = scene.accent + "22";
-      ctx.fillRect(0, 0, w, h);
-    }
+  // Próximo destello de glitch (ver drawGlitch) — momento (performance.now())
+  // en el que puede disparar el próximo, para que no sea cada cuadro.
+  let nextGlitchCheck = 0;
+  let glitchUntil = 0;
+  let glitchSeed = 0;
 
-    // Oscurecido encima de la foto, para que el avatar, los r3tards y los
-    // textos se sigan leyendo bien — las fotos reales tienen mucho más
-    // detalle/contraste que las ilustraciones anteriores, así que este
-    // oscurecido quedó un poco más fuerte que antes (0.32 → 0.4).
-    ctx.fillStyle = "rgba(6,3,14,0.4)";
+  function hash01(n) {
+    const x = Math.sin(n * 12.9898) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  function drawSky(scene, w, h) {
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, scene.top);
+    g.addColorStop(1, scene.bottom);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  /** Portal/núcleo Monad pulsante en el cielo — el elemento central de
+   * marca del fondo: anillos concéntricos que laten y giran despacio,
+   * más el logo real de Monad (monadOrbImg, ya cargado para el resto del
+   * juego) tenue en el centro como sello de marca, no como decoración
+   * genérica. */
+  function drawPortal(scene, w, h, t) {
+    const cx = w * 0.5, cy = h * 0.32;
+    const pulse = 0.5 + 0.5 * Math.sin(t / 900);
+    const baseR = Math.min(w, h) * (0.16 + pulse * 0.02);
+
+    ctx.save();
+    // Resplandor amplio de fondo del portal.
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseR * 3.2);
+    glow.addColorStop(0, scene.accent + Math.round(38 + pulse * 22).toString(16).padStart(2, "0"));
+    glow.addColorStop(1, "transparent");
+    ctx.fillStyle = glow;
     ctx.fillRect(0, 0, w, h);
 
-    // Resplandor pulsante con el color de acento del propio lugar.
-    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 900);
+    // Anillos concéntricos irregulares, cada uno rotando a su propia
+    // velocidad — da sensación de portal "vivo" sin animar frame a frame
+    // con imágenes.
+    for (let i = 0; i < 3; i++) {
+      const r = baseR * (0.55 + i * 0.28);
+      const rot = t / (2600 + i * 900) + i * 1.7;
+      ctx.beginPath();
+      ctx.strokeStyle = scene.accent + (i === 0 ? "cc" : i === 1 ? "88" : "44");
+      ctx.lineWidth = 2.4 - i * 0.5;
+      ctx.setLineDash([r * 0.35, r * 0.18]);
+      ctx.lineDashOffset = rot * r;
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    if (monadOrbImg && monadOrbImg.complete && monadOrbImg.naturalWidth) {
+      ctx.globalAlpha = 0.22 + pulse * 0.1;
+      const r = baseR * 0.55;
+      ctx.drawImage(monadOrbImg, cx - r, cy - r, r * 2, r * 2);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  /** Horizonte de torres/monolitos quebrados con parallax lento y grietas
+   * luminosas — ver buildSkyline/SKYLINES más arriba (silueta fija por
+   * escena, calculada una sola vez). */
+  function drawSkyline(scene, towers, w, h, t) {
+    const baseY = h * 0.82;
+    const drift = ((t * 0.006) % (w * 0.25)) - w * 0.25; // parallax: recorre 1/4 del ancho y se repite
+    ctx.save();
+    for (const tow of towers) {
+      const x = (tow.x * w) + drift;
+      if (x < -w * 0.3 || x > w * 1.3) continue; // fuera de vista, ni molestarse
+      const tw = tow.width * w;
+      const th = tow.height * h;
+      const baseTopY = baseY - th;
+      ctx.fillStyle = scene.skyline;
+      ctx.beginPath();
+      ctx.moveTo(x - tw / 2, baseY);
+      if (tow.jag) {
+        // Punta rota/irregular en vez de un rectángulo perfecto.
+        ctx.lineTo(x - tw / 2, baseTopY + th * 0.22);
+        ctx.lineTo(x - tw * 0.18, baseTopY);
+        ctx.lineTo(x + tw * 0.08, baseTopY + th * 0.14);
+        ctx.lineTo(x + tw / 2, baseTopY + th * 0.3);
+      } else {
+        ctx.lineTo(x - tw / 2, baseTopY);
+        ctx.lineTo(x + tw / 2, baseTopY);
+      }
+      ctx.lineTo(x + tw / 2, baseY);
+      ctx.closePath();
+      ctx.fill();
+
+      // Antena/varilla rota asomando — un detalle de "ruina", no un
+      // edificio intacto.
+      if (tow.antenna) {
+        ctx.strokeStyle = scene.skyline;
+        ctx.lineWidth = Math.max(1, tw * 0.06);
+        ctx.beginPath();
+        ctx.moveTo(x - tw * 0.15, baseTopY);
+        ctx.lineTo(x - tw * 0.05 + tow.seedA * tw * 0.3, baseTopY - th * 0.22);
+        ctx.stroke();
+      }
+
+      // Grieta luminosa vertical — pulsa con el mismo reloj que el portal
+      // para que se sienta parte del mismo fenómeno, no un adorno suelto.
+      if (tow.crack) {
+        const crackPulse = 0.4 + 0.6 * Math.abs(Math.sin(t / 700 + tow.seedB * 10));
+        ctx.strokeStyle = scene.accent;
+        ctx.globalAlpha = crackPulse * 0.75;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        const cx = x - tw * 0.1 + tow.seedA * tw * 0.2;
+        ctx.moveTo(cx, baseY);
+        ctx.lineTo(cx + (tow.seedB - 0.5) * tw * 0.5, baseTopY + th * 0.35);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Ceniza/chispas subiendo desde el horizonte — puramente funcional de
+   * (índice, tiempo): nada de arrays que mantener ni resetear entre
+   * niveles, la posición sale de una fórmula determinística por chispa. */
+  function drawEmbers(scene, w, h, t) {
+    const count = Math.round(26 + scene.intensity * 46);
+    ctx.save();
+    for (let i = 0; i < count; i++) {
+      const seed = i * 7.13 + 1;
+      const speed = 14 + hash01(seed) * 22;
+      const cycle = h + 60;
+      const phase = hash01(seed * 3.1) * cycle;
+      const y = h - (((t / 1000) * speed + phase) % cycle);
+      const xBase = hash01(seed * 5.7) * w;
+      const drift = Math.sin(t / 1400 + seed) * (10 + hash01(seed * 2) * 18);
+      const x = xBase + drift;
+      const size = 0.8 + hash01(seed * 9.3) * (1.6 + scene.intensity * 1.4);
+      const fade = Math.max(0, Math.min(1, y / cycle)); // se apaga cerca del techo
+      ctx.globalAlpha = (0.25 + hash01(seed * 4.4) * 0.55) * (0.35 + fade * 0.65);
+      ctx.fillStyle = scene.ember;
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /** Niebla baja derivando — un par de manchas anchas y muy translúcidas
+   * cerca del piso, para dar profundidad sin tapar a los r3tards. */
+  function drawGroundFog(scene, w, h, t) {
+    ctx.save();
+    for (let i = 0; i < 3; i++) {
+      const speed = 8 + i * 5;
+      const cycle = w + 400;
+      const x = (((t / 1000) * speed + i * 260) % cycle) - 200;
+      const y = h * (0.86 + i * 0.045);
+      const rw = w * 0.55, rh = h * 0.09;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, rw);
+      g.addColorStop(0, scene.accent + "18");
+      g.addColorStop(1, "transparent");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(x, y, rw, rh, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /** Interferencia/glitch — solo en las escenas más caóticas (scene.glitch)
+   * y solo de vez en cuando (no todo el tiempo, sería agotador de ver):
+   * bandas horizontales con leve desfase de color, como una señal de TV
+   * rota. Encaja con el tono "todo se está cayendo a pedazos on-chain". */
+  function drawGlitch(scene, w, h, t) {
+    if (!scene.glitch) return;
+    if (t > nextGlitchCheck) {
+      nextGlitchCheck = t + 1400 + Math.random() * 2600;
+      if (Math.random() < 0.55) {
+        glitchUntil = t + 90 + Math.random() * 160;
+        glitchSeed = Math.random() * 1000;
+      }
+    }
+    if (t > glitchUntil) return;
+    ctx.save();
+    const bands = 3 + Math.round(scene.intensity * 4);
+    for (let i = 0; i < bands; i++) {
+      const by = hash01(glitchSeed + i * 3.3) * h;
+      const bh = 2 + hash01(glitchSeed + i * 7.1) * 10;
+      const offset = (hash01(glitchSeed + i * 1.9) - 0.5) * 26 * scene.intensity;
+      ctx.globalAlpha = 0.22 + hash01(glitchSeed + i) * 0.2;
+      ctx.fillStyle = "#ff2e6a";
+      ctx.fillRect(offset, by, w, bh);
+      ctx.fillStyle = "#5ef1ff";
+      ctx.fillRect(-offset, by + bh * 0.4, w, bh * 0.6);
+    }
+    ctx.restore();
+  }
+
+  function drawBackground() {
+    // 100% Canvas animado, sin fotos ni imágenes externas (ver
+    // MONAD_SCENES/SKYLINES más arriba y el motivo del cambio ahí mismo).
+    // Capas de atrás hacia adelante: cielo degradado → portal Monad
+    // pulsante → horizonte de torres quebradas (parallax) → ceniza
+    // subiendo → niebla baja → oscurecido para legibilidad → glitch en
+    // los niveles más caóticos.
+    const idx = getSceneIdx();
+    const scene = MONAD_SCENES[idx];
+    const towers = SKYLINES[idx];
+    const w = cssW(), h = cssH();
+    const t = performance.now();
+
+    drawSky(scene, w, h);
+    drawPortal(scene, w, h, t);
+    drawSkyline(scene, towers, w, h, t);
+    drawEmbers(scene, w, h, t);
+    drawGroundFog(scene, w, h, t);
+
+    // Oscurecido encima de todo lo anterior, para que el avatar, los
+    // r3tards y los textos se sigan leyendo bien sin importar cuánta
+    // actividad haya en el fondo.
+    ctx.fillStyle = "rgba(6,3,14,0.34)";
+    ctx.fillRect(0, 0, w, h);
+
+    // Resplandor pulsante adicional con el color de acento de la escena
+    // (además del propio portal), sutil, para dar aún más sensación de
+    // "algo vivo" detrás de la acción.
+    const pulse = 0.5 + 0.5 * Math.sin(t / 900);
     const rg = ctx.createRadialGradient(w / 2, h * 0.35, 0, w / 2, h * 0.35, w * 0.7);
-    rg.addColorStop(0, scene.accent + Math.round(16 + pulse * 12).toString(16).padStart(2, "0"));
+    rg.addColorStop(0, scene.accent + Math.round(14 + pulse * 10).toString(16).padStart(2, "0"));
     rg.addColorStop(1, "transparent");
     ctx.fillStyle = rg;
     ctx.fillRect(0, 0, w, h);
+
+    drawGlitch(scene, w, h, t);
   }
 
   /**
@@ -1943,6 +2199,16 @@ const R3Game = (() => {
     ctx.translate(p.x, p.y);
     ctx.rotate(p.rot);
     ctx.lineJoin = "round";
+    // Pedido explícito: "los poderes... se ven muy pequeñas las cosas que
+    // tiran" — antes cada forma medía ~16-22px de punta a punta, casi
+    // invisibles en pantallas chicas. El escalado va DESPUÉS de rotar (no
+    // afecta el ángulo) y ANTES de dibujar cualquier forma/emoji/imagen,
+    // así que agranda por igual las 12 variantes (fruta/basura/roca/
+    // hueso/emoji de personalidad/rayo/láser/disco/logo Monad) sin tener
+    // que retocar cada una a mano. No toca el hitbox (ver update():
+    // avatarHitR es fijo, no depende del tamaño dibujado), así que no
+    // cambia la dificultad — solo se ve mucho mejor.
+    ctx.scale(1.85, 1.85);
 
     if (p.kind === "monad") {
       // Keone/James (ver isMonadSpammer en spawnNFT): spamean el logo
@@ -2114,35 +2380,45 @@ const R3Game = (() => {
   function drawFloatTexts() {
     ctx.textAlign = "center";
     const bigFont = "700 20px 'Kalam', 'Segoe UI', sans-serif";
-    const smallFont = "600 14px 'Kalam', 'Segoe UI', sans-serif";
+    // Antes 14px sin contorno — casi invisible sobre fondos con imagen.
+    // Ahora más grande y con contorno oscuro + píldora de fondo (como las
+    // de los legendarios pero más discreta) para que SIEMPRE se lea.
+    const smallFont = "700 17px 'Kalam', 'Segoe UI', sans-serif";
     for (const t of floatTexts) {
-      ctx.font = t.small ? smallFont : bigFont;
-      ctx.globalAlpha = Math.max(0, t.life) * (t.small ? 0.95 : 1);
-      const maxW = Math.min(cssW() - 28, t.small ? 300 : 420);
-      let text = String(t.text || "");
-      if (ctx.measureText(text).width > maxW) {
-        while (text.length > 8 && ctx.measureText(text + "…").width > maxW) text = text.slice(0, -1);
-        text += "…";
-      }
-      const tw = ctx.measureText(text).width;
-      if (t.small) {
-        const padX = 9, padY = 5;
-        const bx = Math.max(8, Math.min(cssW() - tw - padX * 2 - 8, t.x - tw / 2 - padX));
-        const by = Math.max(8, t.y - 16 - padY);
-        ctx.fillStyle = "rgba(11,7,16,0.88)";
-        ctx.beginPath();
-        const bw = tw + padX * 2, bh = 22 + padY * 2, br = 9;
-        const x0 = bx, y0 = by;
-        ctx.moveTo(x0 + br, y0); ctx.lineTo(x0 + bw - br, y0);
-        ctx.quadraticCurveTo(x0 + bw, y0, x0 + bw, y0 + br);
-        ctx.lineTo(x0 + bw, y0 + bh - br); ctx.quadraticCurveTo(x0 + bw, y0 + bh, x0 + bw - br, y0 + bh);
-        ctx.lineTo(x0 + br, y0 + bh); ctx.quadraticCurveTo(x0, y0 + bh, x0, y0 + bh - br);
-        ctx.lineTo(x0, y0 + br); ctx.quadraticCurveTo(x0, y0, x0 + br, y0); ctx.closePath();
-        ctx.fill();
-        ctx.strokeStyle = t.color; ctx.lineWidth = 1.5; ctx.stroke();
+      const isSmall = !!t.small;
+      ctx.font = isSmall ? smallFont : bigFont;
+      const lifeRatio = Math.max(0, t.life) / (t.maxLife || (isSmall ? 1.7 : 1.1));
+      // Fade-in rápido al aparecer, sostenido, y fade-out al final — así
+      // no aparece y desaparece de golpe, da más tiempo real de lectura.
+      const alpha = Math.max(0, Math.min(1, lifeRatio * 3, (1 - lifeRatio) * 6 + 1));
+      ctx.globalAlpha = alpha * (isSmall ? 1 : 1);
+      if (isSmall) {
+        // Píldora semitransparente de fondo, para que se lea sobre
+        // cualquier fondo (claro, oscuro, con imagen detrás).
+        const padX = 8, padY = 5;
+        const w = ctx.measureText(t.text).width;
+        ctx.fillStyle = "rgba(10, 8, 20, 0.72)";
+        const rx = t.x - w / 2 - padX;
+        const ry = t.y - 14 - padY;
+        const rw = w + padX * 2;
+        const rh = 20 + padY * 2;
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(rx, ry, rw, rh, 8);
+          ctx.fill();
+        } else {
+          ctx.fillRect(rx, ry, rw, rh);
+        }
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(0,0,0,0.9)";
+        ctx.strokeText(t.text, t.x, t.y);
+      } else {
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(0,0,0,0.55)";
+        ctx.strokeText(t.text, t.x, t.y);
       }
       ctx.fillStyle = t.color;
-      ctx.fillText(text, Math.max(10 + tw / 2, Math.min(cssW() - 10 - tw / 2, t.x)), t.y);
+      ctx.fillText(t.text, t.x, t.y);
     }
     ctx.globalAlpha = 1;
   }
@@ -2300,6 +2576,7 @@ const R3Game = (() => {
     enemyThrows = [];
     particles = [];
     floatTexts = [];
+    pendingCommonTaunts = [];
     score = 0;
     lives = CFG.MAX_LIVES;
     wave = 1;

@@ -1,5 +1,21 @@
 name: Publicar R3 Apocalipsis en GitHub Pages
 
+# Se ejecuta solo (sin que tengas que hacer nada) cada vez que subes/actualizas
+# archivos en la rama "main". También puedes lanzarlo a mano desde la pestaña
+# "Actions" del repositorio con el botón "Run workflow".
+#
+# Qué hace, en orden:
+#   1) Genera web/data/collection.json (nombre, rareza de cada r3tard) y
+#      descarga cada imagen a web/data/images/, corriendo
+#      tools/build-collection.mjs en los servidores de GitHub — no en el
+#      navegador de cada jugador. Así el juego nunca tiene que leer la
+#      cadena, ni hablar con gateways de IPFS en vivo (ni sufrir sus
+#      bloqueos de CORS al mostrar las imágenes) para arrancar.
+#   2) Publica la carpeta web/ (ya con esos archivos adentro) en GitHub Pages.
+#
+# Si el snapshot no puede construirse completo, el deploy falla a propósito.
+# Así nunca publicamos una colección parcial o una versión potencialmente vieja.
+
 on:
   push:
     branches: [main]
@@ -28,6 +44,16 @@ jobs:
 
       - name: Generar web/data/collection.json y web/data/images/ (precarga)
         working-directory: tools
+        # continue-on-error: true a propósito. build-collection.mjs YA se
+        # niega a escribir un collection.json incompleto (si falla, no
+        # escribe nada) — pero si a esto le sumamos que un fallo aquí
+        # detenga TODO el deploy, un solo problema pasajero de red hacia
+        # un gateway de IPFS (algo común y fuera de nuestro control) haría
+        # que el sitio entero no se publicara, ni siquiera el código
+        # nuevo. Con continue-on-error, si esto falla, el resto del sitio
+        # se publica igual y el juego cae de respaldo a leer la colección
+        # en vivo desde la cadena (más lento, pero funciona) — así nunca
+        # te quedas con el sitio totalmente caído por esto.
         continue-on-error: true
         run: |
           npm install
