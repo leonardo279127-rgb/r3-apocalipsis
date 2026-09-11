@@ -95,9 +95,19 @@ window.R3_CONFIG = {
     // interpolada linealmente entre "start" (inicio) y "end" (a las 3h).
     // "common" no se configura aquí: se calcula solo como 1 - el resto,
     // así siempre queda una distribución válida (nunca negativa).
+    // Ajustado tras el reporte del usuario: "ni un legendario, y eso que
+    // llegué a 11k puntos" — con los valores viejos (1/1000 al inicio,
+    // 1/50 al final) el cálculo real daba menos de 1 legendario esperado
+    // en varios minutos de juego a ritmo normal, así que no era mala
+    // suerte, era el balance. Los valores nuevos siguen siendo tiers
+    // claramente RAROS (legendario sigue siendo el menos frecuente de
+    // todos, ni de cerca tan común como "raro"/"poco común"), pero ahora
+    // alcanzan a aparecer un par de veces en una partida de pocos minutos
+    // en vez de necesitar sesiones larguísimas. Si se siente muy frecuente
+    // o muy escaso, se puede volver a afinar desde acá.
     tierWeights: {
-      legendary: { start: 0.001, end: 0.02 }, // 1 entre 1000 al inicio → 1 entre 50 al final
-      epic: { start: 0.004, end: 0.05 },
+      legendary: { start: 0.006, end: 0.035 }, // antes 0.001 → 0.02 (1/1000 al inicio, casi nunca aparecía)
+      epic: { start: 0.015, end: 0.07 }, // antes 0.004 → 0.05
       rare: { start: 0.02, end: 0.12 },
       uncommon: { start: 0.18, end: 0.3 },
     },

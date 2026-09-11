@@ -145,9 +145,81 @@ const R3Game = (() => {
 
   /** Nivel de dificultad real (1-10, ver SPAWN_PROGRESSION) → índice 0-9
    * en MONAD_SCENES. El nivel 0 (antes del primer minuto) usa la misma
-   * escena que el nivel 1, para no arrancar la partida sin escenario. */
+   * escena que el nivel 1, para no arrancar la partida sin escenario.
+   * SOLO se usa para decidir la silueta del horizonte (ver drawSkyline) —
+   * para los colores/intensidad, ver sceneBlend() más abajo, que es
+   * continuo en vez de saltar de golpe cada minuto. */
   function getSceneIdx() {
     return Math.max(0, Math.min(MONAD_SCENES.length - 1, lastDifficultyStep - 1));
+  }
+
+  /**
+   * Mezcla continua entre la escena actual y la siguiente — pedido
+   * explícito tras probar el fondo animado: "se ve igual todo el tiempo,
+   * me gustaría que evolucionara a medida que va avanzando la partida".
+   * La dificultad REAL del juego (qué tan seguido caen r3tards, qué tan
+   * probable es un raro) sigue subiendo en saltos de un minuto completo
+   * a propósito (ver progress01() en Spawning, más abajo) — ese salto
+   * "que se note" fue un pedido explícito de otra ronda y no se toca acá.
+   * Pero el FONDO no tiene por qué compartir ese mismo salto: acá se
+   * calcula un progreso CONTINUO (no redondeado a minutos) para que el
+   * color del cielo/portal/ceniza vaya derivando todo el tiempo, en vez
+   * de quedarse fijo 60 segundos y saltar de golpe. Devuelve {a, b, t}:
+   * mezclar MONAD_SCENES[a] y MONAD_SCENES[b] con t (0=todo a, 1=todo b).
+   */
+  function sceneBlend() {
+    const dur = Math.max(1, CFG.SPAWN_PROGRESSION.durationMinutes);
+    const elapsedMin = (performance.now() - sessionStartTs) / 60000;
+    const progressContinuous = Math.max(0, Math.min(1, elapsedMin / dur));
+    const f = progressContinuous * (MONAD_SCENES.length - 1);
+    const a = Math.max(0, Math.min(MONAD_SCENES.length - 1, Math.floor(f)));
+    const b = Math.min(MONAD_SCENES.length - 1, a + 1);
+    return { a, b, t: f - a };
+  }
+
+  function lerp(x, y, t) {
+    return x + (y - x) * t;
+  }
+  function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  // Devuelve "#rrggbb" (NO "rgb(...)") a propósito: varios lugares del
+  // dibujo (drawPortal/drawGroundFog/el resplandor de drawBackground)
+  // arman un color con alpha concatenando dos dígitos hex directamente
+  // al final de scene.accent (ej. `scene.accent + "18"` → "#8f7bff18",
+  // un #RRGGBBAA válido) — con formato "rgb(...)" esa concatenación daría
+  // un color inválido y el canvas lo ignoraría en silencio.
+  function lerpColor(hexA, hexB, t) {
+    const a = hexToRgb(hexA), b = hexToRgb(hexB);
+    const r = Math.round(lerp(a[0], b[0], t));
+    const g = Math.round(lerp(a[1], b[1], t));
+    const bl = Math.round(lerp(a[2], b[2], t));
+    const toHex = (n) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, "0");
+    return `#${toHex(r)}${toHex(g)}${toHex(bl)}`;
+  }
+  /** Escena "virtual" con todos los colores/intensidad ya mezclados entre
+   * las dos escenas reales más cercanas al progreso actual — el resto del
+   * pipeline de dibujo (drawSky/drawPortal/drawEmbers/etc.) no necesita
+   * saber que es una mezcla, la usa igual que a cualquier entrada de
+   * MONAD_SCENES. La silueta del horizonte (ver drawSkyline) es la única
+   * pieza que NO se mezcla — son formas fijas, no colores, así que usa la
+   * escena más cercana (redondeada) tal cual, evitando dibujar dos
+   * horizontes superpuestos.
+   */
+  function blendedScene() {
+    const { a, b, t } = sceneBlend();
+    const sa = MONAD_SCENES[a], sb = MONAD_SCENES[b];
+    return {
+      name: t < 0.5 ? sa.name : sb.name,
+      top: lerpColor(sa.top, sb.top, t),
+      bottom: lerpColor(sa.bottom, sb.bottom, t),
+      accent: lerpColor(sa.accent, sb.accent, t),
+      ember: lerpColor(sa.ember, sb.ember, t),
+      skyline: lerpColor(sa.skyline, sb.skyline, t),
+      intensity: lerp(sa.intensity, sb.intensity, t),
+      glitch: t < 0.5 ? sa.glitch : sb.glitch,
+    };
   }
 
   // ---- Horizonte de torres/monolitos quebrados (silueta de fondo) ----
@@ -1426,11 +1498,29 @@ const R3Game = (() => {
     // propósito: aunque el jugador ya haya matado a ese r3tard (lo más
     // común, dado lo rápido que caen los comunes), la frase sale igual,
     // en la última posición conocida del objeto.
+    //
+    // BUG REAL encontrado tras el reporte "sigue sin verse ninguna, jugué
+    // mucho rato": el disparo pasaba a los 300-750ms de aparecer, pero a
+    // esa altura el r3tard TODAVÍA está casi arriba del todo (cae desde
+    // fuera del canvas, y a esa velocidad apenas bajó unos pocos px) —
+    // la frase terminaba dibujándose por encima del borde superior del
+    // canvas (invisible de verdad, ni con buena suerte se veía) o, como
+    // mucho, justo en la franja de arriba donde `main.js` (spawnTag/
+    // .nft-tag en styles.css) pone una nube de etiquetas DOM opacas por
+    // CADA r3tard que aparece — esa franja está prácticamente siempre
+    // ocupada, así que aunque la frase SÍ se dibujaba (confirmado antes
+    // con una prueba instrumentada), quedaba tapada por esas etiquetas
+    // casi siempre. No era mala suerte ni el idioma/probabilidad: era la
+    // posición. Fix: la frase nunca se dibuja más arriba de esta franja
+    // seguro (debajo de las etiquetas DOM), sin importar dónde esté
+    // realmente el r3tard en ese instante.
+    const commonTauntSafeMinY = Math.min(240, cssH() * 0.32);
     for (let i = pendingCommonTaunts.length - 1; i >= 0; i--) {
       const p = pendingCommonTaunts[i];
       p.delay -= dt * 1000;
       if (p.delay <= 0) {
-        floatText(p.nft.x, p.nft.y - p.nft.size / 2 - 10, p.nft.commonTaunt, "#f4f1ff", true);
+        const y = Math.max(p.nft.y - p.nft.size / 2 - 10, commonTauntSafeMinY);
+        floatText(p.nft.x, y, p.nft.commonTaunt, "#f4f1ff", true);
         pendingCommonTaunts.splice(i, 1);
       }
     }
@@ -1778,9 +1868,15 @@ const R3Game = (() => {
     // pulsante → horizonte de torres quebradas (parallax) → ceniza
     // subiendo → niebla baja → oscurecido para legibilidad → glitch en
     // los niveles más caóticos.
-    const idx = getSceneIdx();
-    const scene = MONAD_SCENES[idx];
-    const towers = SKYLINES[idx];
+    // `scene` mezcla colores continuamente entre las dos escenas más
+    // cercanas al progreso real de la partida (ver blendedScene/
+    // sceneBlend) — pedido explícito tras probar el fondo: "se ve igual
+    // todo el tiempo, me gustaría que evolucionara a medida que va
+    // avanzando la partida". El horizonte (`towers`, formas fijas, no
+    // colores) usa la escena más cercana redondeada — mezclar dos
+    // siluetas de edificios a la vez se vería como un horizonte doble.
+    const scene = blendedScene();
+    const towers = SKYLINES[getSceneIdx()];
     const w = cssW(), h = cssH();
     const t = performance.now();
 
