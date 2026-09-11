@@ -37,6 +37,17 @@ const R3Game = (() => {
   // frase siempre salga, en el lugar donde el jugador lo vio por última
   // vez.
   let pendingCommonTaunts = [];
+  // Burbujas de diálogo tipo cómic (comunes Y legendarios) — a diferencia
+  // de `floatTexts` (que se sueltan en un punto fijo y se van solas), cada
+  // entrada acá guarda la referencia VIVA al nft (`nft`) y se vuelve a
+  // posicionar cada frame según su x/y ACTUAL mientras dibuja/cae — así la
+  // burbuja de verdad "sale" de encima del r3tard en vez de quedar
+  // colgada en el aire en el punto donde apareció. Pedido explícito del
+  // usuario: "deberia aparecer como tipo comic saliendo de ellos". Si el
+  // r3tard ya murió (lo sacaron de `falling`), el objeto sigue vivo en
+  // memoria con su última posición conocida — la burbuja simplemente deja
+  // de moverse y termina de desvanecerse ahí, que es justo lo esperable.
+  let speechBubbles = [];
 
   let score = 0;
   let lives = CFG.MAX_LIVES;
@@ -1257,15 +1268,13 @@ const R3Game = (() => {
     }
   }
 
-  function floatText(x, y, text, color, small) {
-    // `small` (opcional): usado por las frases de los r3tards COMUNES (ver
-    // COMMON_NAD_PHRASES/spawnNFT). Antes eran casi invisibles (chicas,
-    // sin contorno, 0.9s) — el jugador reportó que jugando mucho rato
-    // nunca vio ninguna. Ahora duran más y llevan una "píldora" de fondo
-    // + contorno para que se lean bien sobre cualquier fondo, sin llegar
-    // al tamaño de las de los legendarios (siguen siendo un detalle, no
-    // el protagonista).
-    floatTexts.push({ x, y, text, color, life: small ? 1.7 : 1.1, maxLife: small ? 1.7 : 1.1, vy: small ? -30 : -46, small: !!small });
+  function floatText(x, y, text, color) {
+    // Texto suelto que aparece en un punto FIJO y flota/se desvanece solo
+    // (golpe recibido, "+puntos", subida de arma). Las frases que dice un
+    // r3tard (comunes y legendarios) YA NO usan esto — ver speechBubbles/
+    // drawSpeechBubbles más abajo, que sigue al personaje en vez de
+    // quedar colgado en el aire.
+    floatTexts.push({ x, y, text, color, life: 1.1, maxLife: 1.1, vy: -46 });
   }
 
   // Frases sueltas de "cultura nad" que un r3tard COMÚN puede soltar al
@@ -1334,15 +1343,16 @@ const R3Game = (() => {
         }
       }
 
-      // Frases propias del personaje (solo legendarios) — cuadros de
-      // texto flotantes cortos mientras sigue vivo, para que cada uno se
-      // sienta como alguien distinto y no solo un color de aura distinto.
+      // Frases propias del personaje (solo legendarios) — ahora como
+      // burbuja de diálogo tipo cómic que sigue al r3tard mientras sigue
+      // vivo (ver speechBubbles arriba), para que cada uno se sienta como
+      // alguien distinto y no solo un color de aura distinto.
       if (n.tauntTimer !== null) {
         n.tauntTimer -= dt * 1000;
         if (n.tauntTimer <= 0) {
           const phrases = n.legendaryTheme.taunts[I18N.getLang()] || n.legendaryTheme.taunts.es;
           const phrase = phrases[(Math.random() * phrases.length) | 0];
-          floatText(n.x, n.y - n.size / 2 - 8, phrase, n.legendaryTheme.glowColor);
+          speechBubbles.push({ nft: n, text: phrase, color: n.legendaryTheme.glowColor, life: 2.6, maxLife: 2.6, kind: "legendary" });
           n.tauntTimer = 3200 + Math.random() * 2600;
         }
       }
@@ -1497,32 +1507,30 @@ const R3Game = (() => {
     // pendingCommonTaunts) — se procesan SEPARADAS de `falling` a
     // propósito: aunque el jugador ya haya matado a ese r3tard (lo más
     // común, dado lo rápido que caen los comunes), la frase sale igual,
-    // en la última posición conocida del objeto.
-    //
-    // BUG REAL encontrado tras el reporte "sigue sin verse ninguna, jugué
-    // mucho rato": el disparo pasaba a los 300-750ms de aparecer, pero a
-    // esa altura el r3tard TODAVÍA está casi arriba del todo (cae desde
-    // fuera del canvas, y a esa velocidad apenas bajó unos pocos px) —
-    // la frase terminaba dibujándose por encima del borde superior del
-    // canvas (invisible de verdad, ni con buena suerte se veía) o, como
-    // mucho, justo en la franja de arriba donde `main.js` (spawnTag/
-    // .nft-tag en styles.css) pone una nube de etiquetas DOM opacas por
-    // CADA r3tard que aparece — esa franja está prácticamente siempre
-    // ocupada, así que aunque la frase SÍ se dibujaba (confirmado antes
-    // con una prueba instrumentada), quedaba tapada por esas etiquetas
-    // casi siempre. No era mala suerte ni el idioma/probabilidad: era la
-    // posición. Fix: la frase nunca se dibuja más arriba de esta franja
-    // seguro (debajo de las etiquetas DOM), sin importar dónde esté
-    // realmente el r3tard en ese instante.
-    const commonTauntSafeMinY = Math.min(240, cssH() * 0.32);
+    // en la última posición conocida del objeto. Ahora se muestran como
+    // burbuja de diálogo (`speechBubbles`, ver drawSpeechBubbles) que
+    // sigue al r3tard mientras sigue vivo/cayendo, en vez de un texto
+    // suelto que se dibuja una vez y flota solo — así se ve de verdad
+    // como que la está diciendo ÉL (pedido explícito del usuario:
+    // "deberia aparecer como tipo comic saliendo de ellos").
     for (let i = pendingCommonTaunts.length - 1; i >= 0; i--) {
       const p = pendingCommonTaunts[i];
       p.delay -= dt * 1000;
       if (p.delay <= 0) {
-        const y = Math.max(p.nft.y - p.nft.size / 2 - 10, commonTauntSafeMinY);
-        floatText(p.nft.x, y, p.nft.commonTaunt, "#f4f1ff", true);
+        speechBubbles.push({ nft: p.nft, text: p.nft.commonTaunt, color: "#f4f1ff", life: 2.0, maxLife: 2.0, kind: "common" });
         pendingCommonTaunts.splice(i, 1);
       }
+    }
+
+    // Burbujas de diálogo (comunes + legendarios) — el posicionamiento en
+    // pantalla (con el clamp para no quedar tapadas por las etiquetas DOM
+    // de arriba, ni salirse por los costados) se hace en drawSpeechBubbles,
+    // porque necesita la posición ACTUAL del r3tard (que puede seguir
+    // moviéndose/cayendo mientras la burbuja sigue en pantalla).
+    for (let i = speechBubbles.length - 1; i >= 0; i--) {
+      const b = speechBubbles[i];
+      b.life -= dt;
+      if (b.life <= 0) speechBubbles.splice(i, 1);
     }
 
     // Textos flotantes
@@ -2474,49 +2482,151 @@ const R3Game = (() => {
   }
 
   function drawFloatTexts() {
+    // Textos sueltos de un solo uso (golpe recibido, "+puntos", subida de
+    // arma) — aparecen en un punto fijo y flotan/se desvanecen solos, sin
+    // fondo ni cola. Las frases que "dice" un r3tard (comunes y
+    // legendarios) ya no pasan por acá — ver drawSpeechBubbles.
     ctx.textAlign = "center";
-    const bigFont = "700 20px 'Kalam', 'Segoe UI', sans-serif";
-    // Antes 14px sin contorno — casi invisible sobre fondos con imagen.
-    // Ahora más grande y con contorno oscuro + píldora de fondo (como las
-    // de los legendarios pero más discreta) para que SIEMPRE se lea.
-    const smallFont = "700 17px 'Kalam', 'Segoe UI', sans-serif";
+    ctx.font = "700 20px 'Kalam', 'Segoe UI', sans-serif";
     for (const t of floatTexts) {
-      const isSmall = !!t.small;
-      ctx.font = isSmall ? smallFont : bigFont;
-      const lifeRatio = Math.max(0, t.life) / (t.maxLife || (isSmall ? 1.7 : 1.1));
-      // Fade-in rápido al aparecer, sostenido, y fade-out al final — así
-      // no aparece y desaparece de golpe, da más tiempo real de lectura.
+      const lifeRatio = Math.max(0, t.life) / t.maxLife;
       const alpha = Math.max(0, Math.min(1, lifeRatio * 3, (1 - lifeRatio) * 6 + 1));
-      ctx.globalAlpha = alpha * (isSmall ? 1 : 1);
-      if (isSmall) {
-        // Píldora semitransparente de fondo, para que se lea sobre
-        // cualquier fondo (claro, oscuro, con imagen detrás).
-        const padX = 8, padY = 5;
-        const w = ctx.measureText(t.text).width;
-        ctx.fillStyle = "rgba(10, 8, 20, 0.72)";
-        const rx = t.x - w / 2 - padX;
-        const ry = t.y - 14 - padY;
-        const rw = w + padX * 2;
-        const rh = 20 + padY * 2;
-        if (ctx.roundRect) {
-          ctx.beginPath();
-          ctx.roundRect(rx, ry, rw, rh, 8);
-          ctx.fill();
-        } else {
-          ctx.fillRect(rx, ry, rw, rh);
-        }
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "rgba(0,0,0,0.9)";
-        ctx.strokeText(t.text, t.x, t.y);
-      } else {
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "rgba(0,0,0,0.55)";
-        ctx.strokeText(t.text, t.x, t.y);
-      }
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(0,0,0,0.55)";
+      ctx.strokeText(t.text, t.x, t.y);
       ctx.fillStyle = t.color;
       ctx.fillText(t.text, t.x, t.y);
     }
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Burbujas de diálogo tipo cómic — lo que "dicen" los r3tards (frases de
+   * "cultura nad" de los comunes, y las burlas propias de cada legendario)
+   * mientras siguen cayendo/vivos. A diferencia de un floatText suelto,
+   * se vuelven a posicionar CADA FRAME según la posición ACTUAL del nft
+   * (`b.nft.x`/`b.nft.y`) — por eso de verdad se ve como que la burbuja
+   * "sale" de encima de ese r3tard en particular, en vez de quedar
+   * colgada en el aire donde apareció. Pedido explícito del usuario:
+   * "deberia aparecer como tipo comic saliendo de ellos".
+   */
+  // Parte `text` en varias líneas para que ninguna supere `maxWidth` con
+  // la fuente YA seleccionada en `ctx` (llamar después de fijar ctx.font).
+  // Sin esto, una frase larga (las hay de hasta 9 palabras) desborda la
+  // burbuja por los costados y puede terminar recortada fuera del canvas
+  // — bug real encontrado probando esta misma función.
+  function wrapTextLines(text, maxWidth) {
+    const words = text.split(" ");
+    const lines = [];
+    let cur = "";
+    for (const word of words) {
+      const test = cur ? cur + " " + word : word;
+      if (cur && ctx.measureText(test).width > maxWidth) {
+        lines.push(cur);
+        cur = word;
+      } else {
+        cur = test;
+      }
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  }
+
+  function drawSpeechBubbles() {
+    if (!speechBubbles.length) return;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    const legendaryFont = "700 19px 'Kalam', 'Segoe UI', sans-serif";
+    const commonFont = "700 16px 'Kalam', 'Segoe UI', sans-serif";
+    const w = cssW(), h = cssH();
+    for (const b of speechBubbles) {
+      const isLegendary = b.kind === "legendary";
+      ctx.font = isLegendary ? legendaryFont : commonFont;
+      const lifeRatio = Math.max(0, b.life) / b.maxLife;
+      // Fade-in rápido, sostenido, fade-out al final.
+      const alpha = Math.max(0, Math.min(1, lifeRatio * 4, (1 - lifeRatio) * 6 + 1));
+      ctx.globalAlpha = alpha;
+
+      const nft = b.nft;
+      // Punta de la cola: justo encima de la cabeza del r3tard, EN SU
+      // POSICIÓN ACTUAL (no la de cuando se disparó la frase) — así la
+      // burbuja lo sigue mientras cae/se mueve.
+      const tipX = Math.max(0, Math.min(w, nft.x));
+      const tipY = nft.y - nft.size / 2 - 6;
+
+      const padX = isLegendary ? 11 : 9;
+      const padY = isLegendary ? 7 : 6;
+      const lineH = isLegendary ? 22 : 19;
+      // Ancho máximo de línea de texto (antes de cortar a otra línea):
+      // deja siempre margen a los costados del canvas, sin importar qué
+      // tan angosta sea la pantalla (celular incluido).
+      const maxTextWidth = Math.min(isLegendary ? 250 : 210, w - 56);
+      const lines = wrapTextLines(b.text, maxTextWidth);
+      let widestLine = 0;
+      for (const line of lines) widestLine = Math.max(widestLine, ctx.measureText(line).width);
+      const bw = widestLine + padX * 2;
+      const bh = lineH * lines.length + padY * 2;
+
+      // La burbuja va encima de la punta de la cola, pero nunca más
+      // arriba de la franja donde `main.js` pone las etiquetas DOM de
+      // nombre (mismo bug ya encontrado antes: si no se limita, la
+      // burbuja de un r3tard recién aparecido queda tapada o fuera del
+      // canvas). Al recalcularse cada frame, apenas el r3tard baja lo
+      // suficiente la burbuja lo empieza a seguir con normalidad.
+      const safeMinTop = Math.min(isLegendary ? 210 : 236, h * 0.3);
+      let by = tipY - 14 - bh; // arriba de la punta de la cola
+      by = Math.max(by, safeMinTop);
+      let bx = tipX - bw / 2;
+      bx = Math.max(6, Math.min(w - bw - 6, bx));
+
+      // Cuerpo de la burbuja.
+      ctx.fillStyle = isLegendary ? "rgba(18, 12, 30, 0.82)" : "rgba(10, 8, 20, 0.78)";
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 11);
+      else ctx.rect(bx, by, bw, bh);
+      ctx.fill();
+      if (isLegendary) {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = b.color;
+        ctx.stroke();
+      } else {
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "rgba(255,255,255,0.18)";
+        ctx.stroke();
+      }
+
+      // Cola: triángulo desde el borde inferior de la burbuja hasta justo
+      // encima de la cabeza del r3tard. Si el r3tard está muy cerca del
+      // borde de la burbuja (o la burbuja tuvo que desplazarse mucho para
+      // no salirse por un costado), la base de la cola se limita para que
+      // siga naciendo DENTRO del borde inferior de la burbuja.
+      const bubbleBottom = by + bh;
+      if (tipY > bubbleBottom - 2) {
+        const tailBaseX = Math.max(bx + 12, Math.min(bx + bw - 12, tipX));
+        const tailTipClampedY = Math.min(tipY, bubbleBottom + 20);
+        ctx.fillStyle = isLegendary ? "rgba(18, 12, 30, 0.82)" : "rgba(10, 8, 20, 0.78)";
+        ctx.beginPath();
+        ctx.moveTo(tailBaseX - 7, bubbleBottom - 1);
+        ctx.lineTo(tailBaseX + 7, bubbleBottom - 1);
+        ctx.lineTo(Math.max(bx - 2, Math.min(bx + bw + 2, tipX)), tailTipClampedY);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Texto centrado en la burbuja, una línea a la vez.
+      const textX = bx + bw / 2;
+      ctx.lineWidth = isLegendary ? 3 : 2.5;
+      for (let li = 0; li < lines.length; li++) {
+        const textY = by + padY + lineH * (li + 0.76);
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.strokeText(lines[li], textX, textY);
+        ctx.fillStyle = isLegendary ? b.color : "#f4f1ff";
+        ctx.fillText(lines[li], textX, textY);
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.textBaseline = "alphabetic";
   }
 
   /**
@@ -2647,6 +2757,7 @@ const R3Game = (() => {
     for (const p of projectiles) drawProjectile(p);
     for (const p of enemyThrows) drawEnemyThrow(p);
     drawFloatTexts();
+    drawSpeechBubbles();
     drawAvatar();
     drawWeapon();
 
@@ -2673,6 +2784,7 @@ const R3Game = (() => {
     particles = [];
     floatTexts = [];
     pendingCommonTaunts = [];
+    speechBubbles = [];
     score = 0;
     lives = CFG.MAX_LIVES;
     wave = 1;
